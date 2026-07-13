@@ -60,3 +60,44 @@ export function savePresets(presets: ViewPreset[]): void {
     /* ignore */
   }
 }
+
+const ME_KEY = "dev-directory:me:v1";
+const PUBLISH_KEY = "dev-directory:publish:v1";
+
+export function loadMyUsername(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(ME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveMyUsername(username: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (username) window.localStorage.setItem(ME_KEY, username);
+    else window.localStorage.removeItem(ME_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadPublishHandle(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(PUBLISH_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function savePublishHandle(handle: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (handle) window.localStorage.setItem(PUBLISH_KEY, handle);
+    else window.localStorage.removeItem(PUBLISH_KEY);
+  } catch {
+    /* ignore */
+  }
+}

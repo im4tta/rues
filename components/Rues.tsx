@@ -27,13 +27,14 @@ import {
   Tag as TagIcon,
   Upload,
   User,
+  UserCircle,
   X
 } from "lucide-react";
 import type { Developer, Repo, DirectoryData, Item, Density, UIPrefs, ViewPreset } from "@/lib/types";
 import { DEFAULT_UI, VIRTUALIZE_THRESHOLD } from "@/lib/constants";
 import { sortItems, buildSections } from "@/lib/sort";
 import { downloadFile } from "@/lib/download";
-import { loadDirectory, saveDirectory, loadPresets, savePresets } from "@/lib/storage";
+import { loadDirectory, saveDirectory, loadPresets, savePresets, loadMyUsername, saveMyUsername, savePublishHandle, loadPublishHandle } from "@/lib/storage";
 import {
   buildDevMarkdown,
   buildRepoMarkdown,
@@ -87,6 +88,16 @@ export default function DevTracker() {
   const [importResults, setImportResults] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  // Own-profile (no login) + publish state
+  const [myUsername, setMyUsernameState] = useState("");
+  const [myProfileOpen, setMyProfileOpen] = useState(false);
+  const [myProfileInput, setMyProfileInput] = useState("");
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [publishHandleInput, setPublishHandleInput] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState("");
+  const [publishResult, setPublishResult] = useState<{ slug: string; url: string } | null>(null);
+
   useEffect(() => {
     const initial = loadDirectory();
     setData(initial);
@@ -94,6 +105,7 @@ export default function DevTracker() {
     setHistoryIdx(0);
     setLoaded(true);
     setPresets(loadPresets());
+    setMyUsernameState(loadMyUsername());
   }, []);
 
   // Restore persisted UI preferences.
@@ -378,6 +390,92 @@ export default function DevTracker() {
 
   const updateRepo = (fullName: string, patch: Partial<Repo>) =>
     persist({ ...data, repos: { ...data.repos, [fullName]: { ...data.repos[fullName], ...patch } } });
+
+  // Own profile (no login): define a username and upsert yourself as a Developer.
+  const setMyProfile = async (username: string) => {
+    const uname = username.trim().replace(/^@/, "");
+    if (!uname) return;
+    let next = data;
+    if (myUsername && myUsername !== uname && next.devs[myUsername]?.isMe) {
+      const prev = next.devs[myUsername];
+      next = { ...next, devs: { ...next.devs, [myUsername]: { ...prev, isMe: false } } };
+    }
+    const existing = next.devs[uname];
+    const merged: Developer = {
+      username: uname,
+      name: existing?.name ?? uname,
+      avatar_url: existing?.avatar_url ?? null,
+      bio: existing?.bio ?? null,
+      followers: existing?.followers ?? null,
+      location: existing?.location ?? null,
+      tags: existing?.tags ?? [],
+      notes: existing?.notes ?? "",
+      linkedRepos: existing?.linkedRepos ?? [],
+      lastSynced: existing?.lastSynced,
+      addedAt: existing?.addedAt ?? new Date().toISOString(),
+      isMe: true,
+      stickyNotes: existing?.stickyNotes,
+    };
+    next = { ...next, devs: { ...next.devs, [uname]: merged } };
+    persist(next);
+    setMyUsernameState(uname);
+    saveMyUsername(uname);
+    setToast(`Profile set to @${uname}`);
+
+    // Best-effort: enrich the profile with live GitHub data.
+    try {
+      const res = await fetch(`/api/github/user/${uname}`);
+      if (res.ok) {
+        const j = await res.json();
+        persist({
+          ...data,
+          devs: {
+            ...data.devs,
+            [uname]: {
+              ...merged,
+              name: j.name ?? merged.name,
+              avatar_url: j.avatar_url ?? merged.avatar_url,
+              bio: j.bio ?? merged.bio,
+              followers: j.followers ?? merged.followers,
+              location: j.location ?? merged.location,
+              lastSynced: new Date().toISOString(),
+            },
+          },
+        });
+      }
+    } catch {
+      /* offline — keep the placeholder profile */
+    }
+  };
+
+  // Publish snapshot to the backend so /share/[slug] shows YOUR data to anyone.
+  const publishDirectory = async () => {
+    const handle = publishHandleInput.trim().replace(/^@/, "");
+    if (!handle) {
+      setPublishError("Enter a handle for the public link.");
+      return;
+    }
+    setPublishing(true);
+    setPublishError("");
+    setPublishResult(null);
+    try {
+      const res = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle, data }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Publish failed");
+      savePublishHandle(handle);
+      setPublishResult({ slug: j.slug, url: j.url });
+      setToast("Published! Opening shared page…");
+      window.open(j.url, "_blank", "noopener");
+    } catch (e: any) {
+      setPublishError(e.message || "Publish failed");
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   // First, add state for tracking past links, to auto-reconnect later
   type PastLink = { 
@@ -1181,14 +1279,26 @@ export default function DevTracker() {
                   >
                     <Upload size={13} className="text-[var(--amber-text)]" /> Restore (JSON)
                   </button>
-                  <a
-                    href="/share"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    onClick={() => {
+                      setPublishHandleInput(loadPublishHandle() || myUsername || "");
+                      setPublishOpen(true);
+                      close();
+                    }}
                     className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--text-soft)] hover:bg-[var(--surface-2)]"
                   >
                     <Upload size={13} className="text-[var(--mint-text)]" /> Publish / Share page
-                  </a>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMyProfileInput(myUsername || "");
+                      setMyProfileOpen(true);
+                      close();
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--text-soft)] hover:bg-[var(--surface-2)]"
+                  >
+                    <UserCircle size={13} className="text-[var(--violet-text)]" /> {myUsername ? `My profile (@${myUsername})` : "Set my profile"}
+                  </button>
                 </>
               )}
             </Dropdown>
@@ -1336,6 +1446,115 @@ export default function DevTracker() {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {myProfileOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+                <h2 className="font-display text-lg font-semibold text-[var(--text)]">My profile</h2>
+                <button
+                  onClick={() => setMyProfileOpen(false)}
+                  className="rounded p-1 text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="mt-3 space-y-3 text-[12px] text-[var(--text-2)]">
+                <p>
+                  No login needed. Define your GitHub username and Rues will track you like any other
+                  developer, so you can see your own full profile alongside the devs you follow.
+                </p>
+                <input
+                  value={myProfileInput}
+                  onChange={(e) => setMyProfileInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && (setMyProfile(myProfileInput), setMyProfileOpen(false))}
+                  placeholder="github username (e.g. im4tta)"
+                  className="w-full rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none placeholder-[var(--placeholder)]"
+                />
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2 border-t border-[var(--border)] pt-3">
+                {myUsername && (
+                  <button
+                    onClick={() => {
+                      if (data.devs[myUsername]?.isMe) {
+                        persist({
+                          ...data,
+                          devs: { ...data.devs, [myUsername]: { ...data.devs[myUsername], isMe: false } },
+                        });
+                      }
+                      setMyProfileInput("");
+                      setMyUsernameState("");
+                      saveMyUsername("");
+                      setMyProfileOpen(false);
+                    }}
+                    className="mr-auto rounded-md px-3 py-1.5 text-[12px] text-[var(--text-3)] hover:text-[var(--rose-text)]"
+                  >
+                    Clear profile
+                  </button>
+                )}
+                <button
+                  onClick={() => { setMyProfile(myProfileInput); setMyProfileOpen(false); }}
+                  disabled={!myProfileInput.trim()}
+                  className="rounded-md border border-[var(--violet-text)] px-3 py-1.5 text-[12px] text-[var(--violet-text)] hover:bg-[var(--violet-text)] hover:text-white disabled:opacity-40"
+                >
+                  Save profile
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {publishOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+                <h2 className="font-display text-lg font-semibold text-[var(--text)]">Publish directory</h2>
+                <button
+                  onClick={() => { setPublishOpen(false); setPublishError(""); setPublishResult(null); }}
+                  className="rounded p-1 text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="mt-3 space-y-3 text-[12px] text-[var(--text-2)]">
+                <p>
+                  This saves a snapshot of your current directory to the backend so anyone with the link
+                  sees <strong>your</strong> data — not their own local copy. Re-publishing the same handle
+                  overwrites it.
+                </p>
+                <input
+                  value={publishHandleInput}
+                  onChange={(e) => setPublishHandleInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && publishDirectory()}
+                  placeholder="handle (e.g. im4tta)"
+                  className="w-full rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none placeholder-[var(--placeholder)]"
+                />
+                {publishError && <p className="text-[12px] text-[var(--rose-text)]">{publishError}</p>}
+                {publishResult && (
+                  <p className="text-[12px] text-[var(--mint-text)]">
+                    Live at <a href={publishResult.url} target="_blank" rel="noopener" className="underline">{publishResult.url}</a>
+                  </p>
+                )}
+              </div>
+              <div className="mt-4 flex items-center justify-end gap-2 border-t border-[var(--border)] pt-3">
+                <button
+                  onClick={() => { setPublishOpen(false); setPublishError(""); setPublishResult(null); }}
+                  className="rounded-md px-3 py-1.5 text-[12px] text-[var(--text-3)] hover:text-[var(--text)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={publishDirectory}
+                  disabled={publishing}
+                  className="flex items-center gap-1.5 rounded-md border border-[var(--mint-text)] px-3 py-1.5 text-[12px] text-[var(--mint-text)] hover:bg-[var(--mint-text)] hover:text-white disabled:opacity-40"
+                >
+                  {publishing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                  {publishing ? "Publishing…" : "Publish & open"}
+                </button>
               </div>
             </div>
           </div>

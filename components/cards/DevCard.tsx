@@ -94,6 +94,11 @@ export function DevCard({
               <h3 className={`font-display font-semibold text-[var(--text)] ${grid ? "break-words" : "truncate"}`}>
                 {dev.name || dev.username}
               </h3>
+              {dev.isMe && (
+                <span className="rounded-full bg-[var(--violet-text)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-white">
+                  you
+                </span>
+              )}
               <a
                 href={`https://github.com/${dev.username}`}
                 target="_blank"

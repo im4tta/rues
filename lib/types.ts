@@ -17,6 +17,7 @@ export interface Developer {
   linkedRepos: string[];
   lastSynced?: string;
   addedAt: string;
+  isMe?: boolean;
   stickyNotes?: StickyNote[];
 }
 
