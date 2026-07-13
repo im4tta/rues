@@ -60,6 +60,7 @@ export const GraphView = React.memo(function GraphView({
   const simRef = useRef<d3.Simulation<any, any> | null>(null);
   const adjRef = useRef<Map<string, Set<string>>>(new Map());
   const nodeSelectionRef = useRef<d3.Selection<SVGGElement, any, SVGGElement, unknown> | null>(null);
+  const linkSelectionRef = useRef<any>(null);
   const [graphSelectMode, setGraphSelectMode] = useState(false);
   const graphSelectRef = useRef(false);
   graphSelectRef.current = graphSelectMode;
@@ -379,6 +380,7 @@ export const GraphView = React.memo(function GraphView({
       .attr("stroke", "var(--border-subtle)")
       .attr("stroke-width", 1)
       .attr("opacity", 0.55);
+    linkSelectionRef.current = link;
     link.append("title").text((d: any) => {
       const s = typeof d.source === "object" ? d.source.label || d.source.id : d.source;
       const t = typeof d.target === "object" ? d.target.label || d.target.id : d.target;
@@ -428,24 +430,27 @@ export const GraphView = React.memo(function GraphView({
           delete (d as any)._initialDrag;
         })
       ) as any)
-      .on("click", (event, d: any) => {
-        event.stopPropagation();
-        if (graphSelectMode) {
-          setGraphSelected((prev) => {
-            const next = new Set(prev);
-            if (next.has(d.id)) next.delete(d.id); else next.add(d.id);
-            return next;
-          });
-          return;
-        }
-        setSelected(d.id);
-        if (focusMode) setFocusNodeId(d.id);
-      })
-      .on("dblclick", (event, d: any) => {
-        event.stopPropagation();
-        setSelected(d.id);
-        panToNode(d.id);
-      })
+        .on("click", (event, d: any) => {
+          event.stopPropagation();
+          if (graphSelectMode) {
+            setGraphSelected((prev) => {
+              const next = new Set(prev);
+              if (next.has(d.id)) next.delete(d.id); else next.add(d.id);
+              return next;
+            });
+            return;
+          }
+          setSelected(d.id);
+          setFocusNodeId(d.id);
+          panToNode(d.id);
+          if (simRef.current) simRef.current.alpha(0.25).restart();
+        })
+        .on("dblclick", (event, d: any) => {
+          event.stopPropagation();
+          setSelected(d.id);
+          setFocusNodeId(d.id);
+          panToNode(d.id);
+        })
       .on("mouseover", (event, d: any) => {
         const rect = containerRef.current?.getBoundingClientRect();
         const byId = new Map(items.map((i) => [i.id, i]));
@@ -508,7 +513,7 @@ export const GraphView = React.memo(function GraphView({
     svg.on("click.clear", () => {
       if (!graphSelectRef.current) {
         setSelected(null);
-        if (focusMode) setFocusNodeId(null);
+        setFocusNodeId(null);
       }
     });
 
@@ -587,20 +592,23 @@ export const GraphView = React.memo(function GraphView({
   useEffect(() => {
     if (!nodeSelectionRef.current) return;
 
+    // The focused anchor is the explicit focus node, or the currently selected node.
+    const focusAnchor = focusNodeId || selected;
+    const focusing = !!focusAnchor;
     const focusAdj = new Set<string>();
-    if (focusMode && focusNodeId) {
-      focusAdj.add(focusNodeId);
+    if (focusAnchor) {
+      focusAdj.add(focusAnchor);
       adjRef.current.forEach((targets, source) => {
-        if (source === focusNodeId) targets.forEach(t => focusAdj.add(t));
-        if (targets.has(focusNodeId)) focusAdj.add(source);
+        if (source === focusAnchor) targets.forEach((t) => focusAdj.add(t));
+        if (targets.has(focusAnchor)) focusAdj.add(source);
       });
     }
 
     nodeSelectionRef.current.selectAll("circle")
       .attr("fill-opacity", (d: any) => {
-        if (selected === d.id) return 0.5;
+        if (selected === d.id) return 0.55;
         if (graphSelected.has(d.id)) return 0.45;
-        if (focusMode && focusNodeId && !focusAdj.has(d.id)) return 0.04;
+        if (focusing && !focusAdj.has(d.id)) return 0.04;
         return 0.18;
       })
       .attr("stroke", (d: any) => {
@@ -619,9 +627,33 @@ export const GraphView = React.memo(function GraphView({
     nodeSelectionRef.current.selectAll("text")
       .style("opacity", (d: any) => {
         if (graphSelected.has(d.id)) return "1";
-        return (focusMode && focusNodeId && !focusAdj.has(d.id)) ? "0.15" : "1";
+        return focusing && !focusAdj.has(d.id) ? "0.15" : "1";
       })
       .style("display", showLabels ? "block" : "none");
+
+    // Highlight the selected node's connecting line(s); dim everything else.
+    if (linkSelectionRef.current) {
+      linkSelectionRef.current
+        .attr("stroke", (d: any) => {
+          const s = typeof d.source === "object" ? d.source.id : d.source;
+          const t = typeof d.target === "object" ? d.target.id : d.target;
+          if (focusAnchor && (s === focusAnchor || t === focusAnchor)) {
+            return focusAnchor.startsWith("dev:") ? "var(--violet-text)" : "var(--mint-text)";
+          }
+          return "var(--border-subtle)";
+        })
+        .attr("stroke-width", (d: any) => {
+          const s = typeof d.source === "object" ? d.source.id : d.source;
+          const t = typeof d.target === "object" ? d.target.id : d.target;
+          return focusAnchor && (s === focusAnchor || t === focusAnchor) ? 2.5 : 1;
+        })
+        .attr("opacity", (d: any) => {
+          const s = typeof d.source === "object" ? d.source.id : d.source;
+          const t = typeof d.target === "object" ? d.target.id : d.target;
+          if (focusAnchor && (s === focusAnchor || t === focusAnchor)) return 0.95;
+          return focusing ? 0.1 : 0.55;
+        });
+    }
   }, [selected, showLabels, focusMode, focusNodeId, pinVersion, graphSelected]);
 
   // Export PNG
@@ -1106,26 +1138,6 @@ export const GraphView = React.memo(function GraphView({
             >
               {contribLoading ? <Loader2 size={11} className="animate-spin" /> : <Users size={11} />} contrib
             </button>
-            <div ref={exportAreaRef}>
-              {showExportPopup && <div className="fixed inset-0 z-40" onClick={() => setShowExportPopup(false)} />}
-              <div className={`fixed z-[200] ${isMobile && selectedItem ? "right-3 top-3" : selectedItem ? (detailSide === "right" ? "bottom-20 left-4" : "bottom-20 right-4") : "bottom-20 right-4"}`}>
-                <button onClick={() => setShowExportPopup((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] shadow-lg hover:text-[var(--text)] hover:shadow-xl" title="Export as PNG">
-                  <Download size={12} />
-                </button>
-                {showExportPopup && (
-                  <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200]" : "absolute right-0 bottom-full mb-2 z-[200]"} flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
-                    <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                      Dark background
-                    </button>
-                    <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("light", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-                      Light background
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
             {focusMode && focusNodeId && onExportSubgraph && (
               <button onClick={() => {
                 const adj = new Set<string>([focusNodeId]);
@@ -1401,6 +1413,27 @@ export const GraphView = React.memo(function GraphView({
             </div>
           );
         })()}
+
+        <div ref={exportAreaRef} className="pointer-events-none">
+          {showExportPopup && <div className="fixed inset-0 z-[150] pointer-events-auto" onClick={() => setShowExportPopup(false)} />}
+          <div className={`pointer-events-auto fixed z-[200] ${isMobile && selectedItem ? "right-3 top-3" : selectedItem ? (detailSide === "right" ? "bottom-20 left-4" : "bottom-20 right-4") : "bottom-20 right-4"}`}>
+            <button onClick={() => setShowExportPopup((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] shadow-lg hover:text-[var(--text)] hover:shadow-xl" title="Export as PNG">
+              <Download size={12} />
+            </button>
+            {showExportPopup && (
+              <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200]" : "absolute right-0 bottom-full mb-2 z-[200]"} pointer-events-auto flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                  Dark background
+                </button>
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("light", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                  Light background
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
