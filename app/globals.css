@@ -1,0 +1,251 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Khmer:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --surface: #141a24;
+  --surface-2: #1c2330;
+  --surface-input: #0d1117;
+  --border: #232a38;
+  --border-subtle: #2a3040;
+  --text: #e6e9ef;
+  --text-2: #8890a0;
+  --text-3: #5c6478;
+  --text-4: #3d4454;
+  --placeholder: #4a5162;
+  --danger-bg: #2e1616;
+  --danger-border: #4a1f1f;
+  --danger-text: #ff8080;
+  --danger-text-hover: #e5484d;
+  --text-soft: #c9cedb;
+  --mint-bg: #173028;
+  --mint-text: #5fd9a4;
+  --mint-border: #255843;
+  --mint-text-hover: #7ee8b8;
+  --mint-icon-bg: #10241c;
+  --violet-bg: #241d38;
+  --violet-text: #a78bfa;
+  --violet-border: #3d3160;
+  --amber-bg: #2e2410;
+  --amber-text: #f0b429;
+  --amber-border: #4a3a12;
+}
+
+[data-theme="angkor"] {
+  color-scheme: dark;
+  --bg: #1a1410;
+  --surface: #2a2018;
+  --surface-2: #3a2c20;
+  --surface-input: #1a1410;
+  --border: #4a3a2a;
+  --border-subtle: #5a4834;
+  --text: #e8ddd0;
+  --text-2: #b8a898;
+  --text-3: #8a7a6a;
+  --text-4: #6a5a4a;
+  --placeholder: #7a6a5a;
+  --danger-bg: #3a1a10;
+  --danger-border: #5a2a18;
+  --danger-text: #ff8a6a;
+  --danger-text-hover: #e8704a;
+  --text-soft: #d8cdc0;
+  --mint-bg: #2a3020;
+  --mint-text: #c8643c;
+  --mint-border: #5a4030;
+  --mint-text-hover: #d87a50;
+  --mint-icon-bg: #201810;
+  --violet-bg: #302830;
+  --violet-text: #d4a870;
+  --violet-border: #5a4840;
+  --amber-bg: #3a2e10;
+  --amber-text: #d4a030;
+  --amber-border: #5a4820;
+}
+
+[data-theme="mekong"] {
+  color-scheme: dark;
+  --bg: #0c1624;
+  --surface: #14202e;
+  --surface-2: #1c3040;
+  --surface-input: #0c1624;
+  --border: #244054;
+  --border-subtle: #2a4c64;
+  --text: #d0e4f0;
+  --text-2: #90b8d0;
+  --text-3: #6088a0;
+  --text-4: #406078;
+  --placeholder: #507080;
+  --danger-bg: #2a1820;
+  --danger-border: #4a2840;
+  --danger-text: #f080a0;
+  --danger-text-hover: #e06080;
+  --text-soft: #b0d0e0;
+  --mint-bg: #102c28;
+  --mint-text: #3cb8a0;
+  --mint-border: #205048;
+  --mint-text-hover: #50d0b8;
+  --mint-icon-bg: #0c2018;
+  --violet-bg: #182440;
+  --violet-text: #5b7ef0;
+  --violet-border: #284068;
+  --amber-bg: #282010;
+  --amber-text: #d4a030;
+  --amber-border: #483818;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f8fa;
+  --surface: #ffffff;
+  --surface-2: #eef1f4;
+  --surface-input: #ffffff;
+  --border: #d0d7de;
+  --border-subtle: #d8dee4;
+  --text: #1f2328;
+  --text-2: #59636e;
+  --text-3: #656d76;
+  --text-4: #8c959f;
+  --placeholder: #9aa1ab;
+  --danger-bg: #ffebe9;
+  --danger-border: #ffc1ba;
+  --danger-text: #cf222e;
+  --danger-text-hover: #cf222e;
+  --text-soft: #424a53;
+  --mint-bg: #dafbe1;
+  --mint-text: #1a7f37;
+  --mint-border: #aef0c0;
+  --mint-text-hover: #1a7f37;
+  --mint-icon-bg: #dafbe1;
+  --violet-bg: #f5f0ff;
+  --violet-text: #8250df;
+  --violet-border: #e3d4ff;
+  --amber-bg: #fff8c5;
+  --amber-text: #9a6700;
+  --amber-border: #f2e07d;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Prevent double-tap zoom on mobile */
+* {
+  touch-action: manipulation;
+}
+
+.font-display {
+  font-family: "Space Grotesk", ui-sans-serif, sans-serif;
+}
+
+.font-khmer {
+  font-family: "Noto Sans Khmer", "Space Grotesk", ui-sans-serif, sans-serif;
+}
+
+body {
+  font-family: "Inter", ui-sans-serif, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.list-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.list-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.list-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.list-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+
+.list-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+.font-mono,
+input,
+textarea,
+code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@keyframes animate-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-in {
+  animation: animate-in 0.15s ease-out both;
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node circle {
+  transition: fill-opacity 0.15s ease, stroke 0.15s ease, stroke-width 0.15s ease;
+}
+
+.graph-node:hover circle {
+  fill-opacity: 0.35 !important;
+}
+
+.graph-node text {
+  transition: opacity 0.15s ease;
+}
+
+.graph-edge {
+  transition: opacity 0.2s ease;
+}
+
+.graph-node .halo {
+  stroke-dasharray: 0;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+.bento-grid {
+  transition: columns 0.3s ease, column-gap 0.3s ease;
+}
+
+@keyframes bento-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.bento-item {
+  animation: bento-in 0.35s ease-out both;
+}
+
+/* Dropdown menus (Display / filters / etc.) on small screens.
+   This is a belt-and-braces CSS override that sits on top of the
+   JS-computed left/right alignment in components/ui/Dropdown.tsx —
+   even if that measurement is ever off (e.g. hydration timing), these
+   rules guarantee the panel can never run off-screen in portrait mode. */
+@media (max-width: 640px) {
+  .dropdown-panel {
+    left: 0.5rem !important;
+    right: 0.5rem !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+}
