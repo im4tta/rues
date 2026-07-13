@@ -377,6 +377,8 @@ export const GraphView = React.memo(function GraphView({
       .data(edges)
       .join("line")
       .attr("class", "graph-edge")
+      .attr("data-src", (d: any) => (typeof d.source === "object" ? d.source.id : d.source))
+      .attr("data-dst", (d: any) => (typeof d.target === "object" ? d.target.id : d.target))
       .attr("stroke", "var(--border-subtle)")
       .attr("stroke-width", 1)
       .attr("opacity", 0.55);
@@ -391,6 +393,7 @@ export const GraphView = React.memo(function GraphView({
       .data(nodes, (d: any) => d.id)
       .join("g")
       .attr("class", (d: any) => "graph-node node-" + d.type)
+      .attr("data-id", (d: any) => d.id)
       .call((d3.drag<SVGGElement, any>()
         .on("start", (event, d: any) => {
           if (!event.active) sim.alphaTarget(0.25).restart();
@@ -657,7 +660,7 @@ export const GraphView = React.memo(function GraphView({
   }, [selected, showLabels, focusMode, focusNodeId, pinVersion, graphSelected]);
 
   // Export PNG
-  const exportPng = useCallback((bgChoice: "dark" | "light" = "dark", selDev?: any) => {
+  const exportPng = useCallback((bgChoice: "dark" | "light" = "dark", focusItem?: any) => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
     const rect = svgEl.getBoundingClientRect();
@@ -681,22 +684,47 @@ export const GraphView = React.memo(function GraphView({
     bgRect.setAttribute("fill", bg);
     clone.insertBefore(bgRect, clone.firstChild);
 
-    // When exporting a selected dev, dim non-connected nodes
-    if (selDev) {
-      const connected = new Set([
-        selDev.username,
-        ...(selDev.linkedRepos || []),
-      ]);
+    // When focusing a node, isolate its local subgraph and re-fit the view.
+    const idConnected = new Set<string>();
+    if (focusItem) {
+      idConnected.add(focusItem.id);
+      if (focusItem.kind === "dev") (focusItem.data.linkedRepos || []).forEach((r: string) => idConnected.add("repo:" + r));
+      else (focusItem.data.linkedDevs || []).forEach((u: string) => idConnected.add("dev:" + u));
+
       const groups = clone.querySelectorAll("g.graph-node");
       groups.forEach((g) => {
-        const textEl = g.querySelector("text");
-        if (!textEl) return;
-        const label = textEl.textContent || "";
-        if (!connected.has(label)) {
-          g.setAttribute("opacity", "0.12");
+        const id = g.getAttribute("data-id");
+        if (id && !idConnected.has(id)) {
+          g.setAttribute("display", "none");
           g.setAttribute("pointer-events", "none");
         }
       });
+      const lines = clone.querySelectorAll("line.graph-edge");
+      lines.forEach((e) => {
+        const s = e.getAttribute("data-src");
+        const t = e.getAttribute("data-dst");
+        if (s && t && s !== focusItem.id && t !== focusItem.id) {
+          e.setAttribute("display", "none");
+          e.setAttribute("pointer-events", "none");
+        }
+      });
+
+      // Re-fit the SVG group to the focused subgraph's bounding box.
+      const all = (simRef.current?.nodes() as any[]) || [];
+      const sub = all.filter((n) => idConnected.has(n.id) && n.x != null);
+      if (sub.length) {
+        const xs = sub.map((n) => n.x as number);
+        const ys = sub.map((n) => n.y as number);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        const bw = Math.max(maxX - minX, 1), bh = Math.max(maxY - minY, 1);
+        const p = 70;
+        const scale = Math.min((rect.width - p * 2) / bw, (rect.height - p * 2) / bh, 2.2) || 1;
+        const tx = rect.width / 2 - ((minX + maxX) / 2) * scale;
+        const ty = rect.height / 2 - ((minY + maxY) / 2) * scale;
+        const topG = clone.querySelector("g");
+        if (topG) topG.setAttribute("transform", `translate(${tx},${ty}) scale(${scale})`);
+      }
     }
 
     const xml = new XMLSerializer().serializeToString(clone);
@@ -727,179 +755,139 @@ export const GraphView = React.memo(function GraphView({
         else ctx.rect(x, y, w, h);
       };
 
-      // --- Top-left panel: Legend or Selected Dev ---
       const devCount = nodes.filter((n) => n.type === "dev").length;
       const repoCount = nodes.length - devCount;
       const langList = Array.from(new Set(nodes.filter((n) => n.language).map((n) => n.language as string))).sort();
 
-      const panelW = Math.min(320, Math.max(200, rect.width * 0.45));
+      const panelW = Math.min(320, Math.max(220, rect.width * 0.46));
       const contentMax = panelW - 28;
-      let panelH: number;
 
-      if (selDev) {
-        // Compute derived data first
-        const devRepoLabels = new Set(selDev.linkedRepos || []);
-        const linkedRepos = nodes.filter((n: any) => n.type === "repo" && devRepoLabels.has(n.label));
-        const devLangs = linkedRepos.map((n: any) => n.language).filter(Boolean) as string[];
-        const langCounts: Record<string, number> = {};
-        devLangs.forEach((l: string) => { langCounts[l] = (langCounts[l] || 0) + 1; });
-        const sortedLangs = Object.entries(langCounts).sort((a, b) => b[1] - a[1]);
-        const totalStars = linkedRepos.reduce((s: number, n: any) => s + (n.stars || 0), 0);
+      const renderWrap = (text: string, maxW: number, color: string, lineH: number, lx: number, lyRef: { v: number }) => {
+        ctx.fillStyle = color;
+        const words = text.split(" ");
+        let line = "";
+        for (const w of words) {
+          const test = line ? line + " " + w : w;
+          if (ctx.measureText(test).width > maxW) {
+            ctx.fillText(line, lx, lyRef.v); lyRef.v += lineH;
+            line = w;
+          } else { line = test; }
+        }
+        if (line) { ctx.fillText(line, lx, lyRef.v); lyRef.v += lineH; }
+      };
 
-        // Measure lines accurately
+      if (focusItem) {
+        // --- Focused node details legend ---
+        const d = focusItem.data;
+        const isDev = focusItem.kind === "dev";
+        const accent = isDev ? violet : mint;
+        const linkedIds = isDev
+          ? (d.linkedRepos || []).map((r: string) => "repo:" + r)
+          : (d.linkedDevs || []).map((u: string) => "dev:" + u);
+        const linkedLabels = nodes.filter((n: any) => linkedIds.includes(n.id)).map((n: any) => n.label);
+        const tags = (d.tags || []).slice(0, 8);
+        const tagW = (t: string) => Math.min(ctx.measureText(t).width + 16, contentMax);
+
         ctx.font = "500 10px 'JetBrains Mono', monospace";
-
         const wrapCount = (text: string, maxW: number) => {
           if (!text) return 0;
           const words = text.split(" ");
           let line = "", count = 1;
           for (const w of words) {
             const test = line ? line + " " + w : w;
-            if (ctx.measureText(test).width > maxW) { count++; line = w; }
-            else { line = test; }
+            if (ctx.measureText(test).width > maxW) { count++; line = w; } else line = test;
           }
           return count;
         };
 
-        // Stats lines (username + followers etc)
-        const statLine1 = `@${selDev.username}`;
-        const statLine2 = `${selDev.followers ?? "—"} followers  ·  ${(selDev.linkedRepos || []).length} repos  ·  ${(selDev.tags || []).length} tags  ·  ⭐${totalStars}`;
-        const stat1W = ctx.measureText(statLine1).width;
-        const stat2W = ctx.measureText(statLine2).width;
-        const statLines = (stat1W > contentMax ? wrapCount(statLine1, contentMax) : 1)
-                       + (stat2W > contentMax ? wrapCount(statLine2, contentMax) : 1);
+        const line1 = isDev ? `@${d.username}` : d.fullName;
+        const statBits: string[] = isDev
+          ? [`${d.followers ?? "—"} followers`, `${(d.linkedRepos || []).length} repos`, `${(d.tags || []).length} tags`]
+          : [`⭐ ${d.stars ?? "—"}`, `${(d.linkedDevs || []).length} devs`, d.language ? d.language : ""].filter(Boolean);
+        const line2 = statBits.join("  ·  ");
+        const desc = isDev ? (d.bio || "") : (d.description || "");
+        const bioLines = desc ? wrapCount(desc, contentMax) : 0;
 
-        const bioLines = selDev.bio ? wrapCount(selDev.bio, contentMax) : 0;
+        const stat1W = ctx.measureText(line1).width;
+        const stat2W = ctx.measureText(line2).width;
+        const statLines = (stat1W > contentMax ? wrapCount(line1, contentMax) : 1) + (stat2W > contentMax ? wrapCount(line2, contentMax) : 1);
 
-        // Tag pills: measure how many fit per line
-        ctx.font = "500 9px 'JetBrains Mono', monospace";
-        const tagW = (t: string) => Math.min(ctx.measureText(t).width + 16, contentMax);
-        const tags = (selDev.tags || []).slice(0, 8);
         let tagRows = 0;
         if (tags.length) {
-          let cx = pad;
-          tagRows = 1;
-          for (const t of tags) {
-            const tw = tagW(t);
-            if (cx + tw > pad - 8 + panelW - 12) { cx = pad; tagRows++; }
-            cx += tw + 4;
-          }
+          ctx.font = "500 9px 'JetBrains Mono', monospace";
+          let cx = pad; tagRows = 1;
+          for (const t of tags) { const tw = tagW(t); if (cx + tw > pad - 8 + panelW - 12) { cx = pad; tagRows++; } cx += tw + 4; }
         }
 
-        // Language pills
-        let langRows = 0;
-        if (sortedLangs.length) {
-          let cx = pad;
-          langRows = 1;
-          for (const [, cnt] of sortedLangs.slice(0, 8)) {
-            const label = `${cnt}`;
-            const lw = Math.min(ctx.measureText(label).width + 18, contentMax);
-            if (cx + lw > pad - 8 + panelW - 12) { cx = pad; langRows++; }
-            cx += lw + 4;
-          }
-        }
+        const linkedLines = linkedLabels.length ? wrapCount(linkedLabels.slice(0, 12).join(", "), contentMax) : 0;
+        const hasLocation = isDev && !!d.location;
 
-        // Location line
-        const hasLocation = !!selDev.location;
-
-        panelH = 24 + 22 + (statLines * 15) + 6
-               + (bioLines ? bioLines * 15 + 8 : 0)
-               + (tags.length ? tagRows * 18 + 22 : 0)
-               + (sortedLangs.length ? 14 + langRows * 18 + 8 : 0)
-               + (hasLocation ? 18 : 0)
-               + 12;
-        panelH = Math.max(panelH, 120);
+        let panelH = 24 + 22 + statLines * 15 + 6
+          + (bioLines ? bioLines * 15 + 8 : 0)
+          + (tags.length ? tagRows * 18 + 22 : 0)
+          + (linkedLabels.length ? 14 + linkedLines * 14 + 8 : 0)
+          + (hasLocation ? 18 : 0)
+          + 12;
+        panelH = Math.max(panelH, 130);
 
         ctx.save();
-        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
         rr(pad - 8, pad - 8, panelW, panelH, 10);
         ctx.fill();
-        ctx.beginPath();
-        rr(pad - 8, pad - 8, panelW, panelH, 10);
-        ctx.clip();
+        ctx.beginPath(); rr(pad - 8, pad - 8, panelW, panelH, 10); ctx.clip();
 
-        let lx = pad, ly = pad + 8;
+        let lx = pad;
+        const ly = { v: pad + 8 };
 
-        // --- Name ---
         ctx.font = "700 14px 'JetBrains Mono', monospace";
-        ctx.fillStyle = violet;
-        ctx.fillText((selDev.name || selDev.username).slice(0, 30), lx, ly);
-        ly += 22;
+        ctx.fillStyle = accent;
+        ctx.fillText((isDev ? (d.name || d.username) : d.fullName).slice(0, 32), lx, ly.v);
+        ly.v += 22;
 
-        // --- Stats (wrapped) ---
         ctx.font = "500 10px 'JetBrains Mono', monospace";
-        const renderWrap = (text: string, maxW: number, color: string, lineH: number) => {
-          ctx.fillStyle = color;
-          const words = text.split(" ");
-          let line = "";
-          for (const w of words) {
-            const test = line ? line + " " + w : w;
-            if (ctx.measureText(test).width > maxW) {
-              ctx.fillText(line, lx, ly); ly += lineH;
-              line = w;
-            } else { line = test; }
-          }
-          if (line) { ctx.fillText(line, lx, ly); ly += lineH; }
-        };
         ctx.fillStyle = subColor;
-        renderWrap(statLine1, contentMax, subColor, 15);
-        renderWrap(statLine2, contentMax, subColor, 15);
-        ly += 6;
+        renderWrap(line1, contentMax, subColor, 15, lx, ly);
+        renderWrap(line2, contentMax, subColor, 15, lx, ly);
+        ly.v += 6;
 
-        // --- Location ---
         if (hasLocation) {
           ctx.font = "500 10px 'JetBrains Mono', monospace";
           ctx.fillStyle = textColor;
-          ctx.fillText(`📍 ${selDev.location}`, lx, ly);
-          ly += 18;
+          ctx.fillText(`📍 ${d.location}`, lx, ly.v);
+          ly.v += 18;
         }
-
-        // --- Bio (wrapped) ---
-        if (selDev.bio && bioLines) {
+        if (desc && bioLines) {
           ctx.font = "500 10px 'JetBrains Mono', monospace";
-          renderWrap(selDev.bio, contentMax, textColor, 15);
-          ly += 8;
+          renderWrap(desc, contentMax, textColor, 15, lx, ly);
+          ly.v += 8;
         }
 
-        // --- Tag pills (wrapped) ---
         if (tags.length) {
           ctx.font = "500 9px 'JetBrains Mono', monospace";
           let cx = lx;
           for (const t of tags) {
             const tw = tagW(t);
-            if (cx + tw > pad - 8 + panelW - 12) { cx = lx; ly += 18; }
+            if (cx + tw > pad - 8 + panelW - 12) { cx = lx; ly.v += 18; }
             ctx.fillStyle = "rgba(167,139,250,0.15)";
-            rr(cx, ly - 8, tw, 14, 4);
-            ctx.fill();
-            ctx.fillStyle = violet;
-            ctx.fillText(t, cx + 8, ly);
-            cx += tw + 4;
+            rr(cx, ly.v - 8, tw, 14, 4); ctx.fill();
+            ctx.fillStyle = violet; ctx.fillText(t, cx + 8, ly.v); cx += tw + 4;
           }
-          ly += 22;
+          ly.v += 22;
         }
 
-        // --- Language pills with count ---
-        if (sortedLangs.length) {
+        if (linkedLabels.length) {
           ctx.font = "500 9px 'JetBrains Mono', monospace";
           ctx.fillStyle = subColor;
-          ctx.fillText("Languages:", lx, ly);
-          ly += 14;
-          let cx = lx;
-          for (const [lang, cnt] of sortedLangs.slice(0, 8)) {
-            const label = `${lang} ${cnt}`;
-            const lw = Math.min(ctx.measureText(label).width + 18, contentMax);
-            if (cx + lw > pad - 8 + panelW - 12) { cx = lx; ly += 18; }
-            const lc = languageColor(lang);
-            ctx.fillStyle = lc.startsWith("var(") ? "#999999" : lc;
-            ctx.fillRect(cx, ly - 7, 7, 7);
-            ctx.fillStyle = textColor;
-            ctx.fillText(label, cx + 11, ly);
-            cx += lw + 4;
-          }
+          ctx.fillText(isDev ? "Linked repositories:" : "Linked developers:", lx, ly.v);
+          ly.v += 14;
+          ctx.fillStyle = textColor;
+          renderWrap(linkedLabels.slice(0, 12).join(", "), contentMax, textColor, 14, lx, ly);
         }
+        ctx.restore();
       } else {
+        // --- Legend (full graph) ---
         const langRows = Math.max(1, Math.ceil(Math.min(langList.length, 16) / 3));
-        panelH = 26 + 22 + 22 + 20 + langRows * 18 + 10;
+        const panelH = 26 + 22 + 22 + 20 + langRows * 18 + 10;
         ctx.save();
         ctx.fillStyle = "rgba(0,0,0,0.45)";
         rr(pad - 8, pad - 8, panelW, panelH, 10);
@@ -929,21 +917,17 @@ export const GraphView = React.memo(function GraphView({
         ly += 16;
         let cxp = lx;
         for (const l of langList.slice(0, 16)) {
-          const label = l;
-          const w = ctx.measureText(label).width + 18;
-          if (cxp + w > pad - 8 + panelW - 8) {
-            cxp = lx;
-            ly += 16;
-          }
+          const w = ctx.measureText(l).width + 18;
+          if (cxp + w > pad - 8 + panelW - 8) { cxp = lx; ly += 16; }
           const lc = languageColor(l);
           ctx.fillStyle = lc.startsWith("var(") ? "#999999" : lc;
           ctx.fillRect(cxp, ly - 9, 9, 9);
           ctx.fillStyle = textColor;
-          ctx.fillText(label, cxp + 13, ly);
+          ctx.fillText(l, cxp + 13, ly);
           cxp += w + 6;
         }
+        ctx.restore();
       }
-      ctx.restore();
 
       // --- Footer (bottom) ---
       const footer = "Rues (ឫស)";
@@ -963,8 +947,10 @@ export const GraphView = React.memo(function GraphView({
         const a = document.createElement("a");
         a.href = url;
         const date = new Date().toISOString().slice(0, 10);
-        const devName = selDev ? selDev.username : "graph";
-        a.download = `rues-${devName}-${date}.png`;
+        const name = focusItem
+          ? (focusItem.kind === "dev" ? focusItem.data.username : focusItem.data.fullName.replace("/", "-"))
+          : "graph";
+        a.download = `rues-${name}-${date}.png`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 2000);
       });
@@ -1421,14 +1407,32 @@ export const GraphView = React.memo(function GraphView({
               <Download size={12} />
             </button>
             {showExportPopup && (
-              <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200]" : "absolute right-0 bottom-full mb-2 z-[200]"} pointer-events-auto flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
-                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
+              <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200]" : "absolute right-0 bottom-full mb-2 z-[200]"} pointer-events-auto flex w-44 flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
+                {selectedItem ? (
+                  <>
+                    <div className="px-1 pb-0.5 font-mono text-[9px] uppercase tracking-wide text-[var(--text-3)]">
+                      Focus · {selectedItem.kind}
+                    </div>
+                    <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark", selectedItem); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                      Focus · dark
+                    </button>
+                    <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("light", selectedItem); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                      Focus · light
+                    </button>
+                    <div className="my-0.5 h-px bg-[var(--border)]" />
+                  </>
+                ) : (
+                  <div className="px-1 pb-1 font-mono text-[9px] text-[var(--text-3)]">Select a node to focus</div>
+                )}
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark"); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text-2)] hover:bg-[var(--surface-2)]">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                  Dark background
+                  Full graph · dark
                 </button>
-                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("light", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("light"); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text-2)] hover:bg-[var(--surface-2)]">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-                  Light background
+                  Full graph · light
                 </button>
               </div>
             )}
