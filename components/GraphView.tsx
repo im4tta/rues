@@ -21,6 +21,7 @@ import type { Developer, Repo, Item } from "@/lib/types";
 import { timeAgo, formatDateTime, syncLabel } from "@/lib/format";
 import { languageColor } from "@/lib/colors";
 import { computeClusters, clusterColor } from "@/lib/analytics";
+import { ghContributors, ghUserEvents } from "@/lib/github";
 import { renderBasicMarkdownLines } from "@/lib/markdown";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { Chip } from "@/components/ui/Chip";
@@ -125,7 +126,7 @@ export const GraphView = React.memo(function GraphView({
         missing.map(async (n) => {
           const [o, r] = n.split("/");
           try {
-            const res = await fetch(`/api/github/repo/${o}/${r}/contributors`);
+            const res = await ghContributors(o, r);
             if (!res.ok) return [n, [] as Contributor[]];
             const j = await res.json();
             return [n, (j.contributors || []) as Contributor[]];
@@ -981,7 +982,7 @@ export const GraphView = React.memo(function GraphView({
     const username = selectedItem.data.username;
     let cancelled = false;
     setActivity({ loading: true, events: [] });
-    fetch(`/api/github/user/${encodeURIComponent(username)}/events`)
+    ghUserEvents(username)
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;

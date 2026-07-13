@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, Check, Loader2, Search, Star, X } from "lucide-react";
 import type { Repo } from "@/lib/types";
+import { ghUserRepos } from "@/lib/github";
 
 export function RepoBrowser({
   username,
@@ -28,7 +29,7 @@ export function RepoBrowser({
     let active = true;
     (async () => {
       try {
-        const res = await fetch(`/api/github/user/${username}/repos`);
+        const res = await ghUserRepos(username);
         const j = await res.json();
         if (!res.ok) throw new Error(j.error || "Failed to load repos");
         if (active) setRepos(j.repos || []);

@@ -36,6 +36,7 @@ import { sortItems, buildSections } from "@/lib/sort";
 import { downloadFile } from "@/lib/download";
 import { loadDirectory, saveDirectory, loadPresets, savePresets, loadMyUsername, saveMyUsername, savePublishHandle, loadPublishHandle } from "@/lib/storage";
 import { encodeShare } from "@/lib/share";
+import { ghUser, ghRepo, ghStarred } from "@/lib/github";
 import {
   buildDevMarkdown,
   buildRepoMarkdown,
@@ -264,7 +265,7 @@ export default function DevTracker() {
 
     setBusy((b) => ({ ...b, [`dev:${username}`]: true }));
     try {
-      const res = await fetch(`/api/github/user/${username}`);
+      const res = await ghUser(username);
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to fetch user");
       
@@ -312,7 +313,7 @@ export default function DevTracker() {
     const [owner, repo] = input.split("/");
     setBusy((b) => ({ ...b, [`repo:${input}`]: true }));
     try {
-      const res = await fetch(`/api/github/repo/${owner}/${repo}`);
+      const res = await ghRepo(owner, repo);
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to fetch repo");
       
@@ -355,7 +356,7 @@ export default function DevTracker() {
   const refreshDev = async (username: string) => {
     setBusy((b) => ({ ...b, [`dev:${username}`]: true }));
     try {
-      const res = await fetch(`/api/github/user/${username}`);
+      const res = await ghUser(username);
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to sync");
       const next = { ...data, devs: { ...data.devs, [username]: { ...data.devs[username], ...j } } };
@@ -370,7 +371,7 @@ export default function DevTracker() {
     const [owner, repo] = fullName.split("/");
     setBusy((b) => ({ ...b, [`repo:${fullName}`]: true }));
     try {
-      const res = await fetch(`/api/github/repo/${owner}/${repo}`);
+      const res = await ghRepo(owner, repo);
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to sync");
       const next = { ...data, repos: { ...data.repos, [fullName]: { ...data.repos[fullName], ...j } } };
@@ -425,7 +426,7 @@ export default function DevTracker() {
 
     // Best-effort: enrich the profile with live GitHub data.
     try {
-      const res = await fetch(`/api/github/user/${uname}`);
+      const res = await ghUser(uname);
       if (res.ok) {
         const j = await res.json();
         persist({
@@ -809,7 +810,7 @@ export default function DevTracker() {
     const fetchedDevs: Record<string, any> = {};
     for (const username of devs) {
       try {
-        const res = await fetch(`/api/github/user/${username}`);
+        const res = await ghUser(username);
         const j = await res.json();
         if (!res.ok) throw new Error(j.error || "Not found");
         fetchedDevs[username] = j;
@@ -825,7 +826,7 @@ export default function DevTracker() {
     for (const fullName of repos) {
       const [owner, repo] = fullName.split("/");
       try {
-        const res = await fetch(`/api/github/repo/${owner}/${repo}`);
+        const res = await ghRepo(owner, repo);
         const j = await res.json();
         if (!res.ok) throw new Error(j.error || "Not found");
         fetchedRepos[j.fullName] = j;
@@ -942,7 +943,7 @@ export default function DevTracker() {
     setImportBusy(true);
     setImportResults([`Fetching @${username}'s starred repos…`]);
     try {
-      const res = await fetch(`/api/github/user/${username}/starred`);
+      const res = await ghStarred(username);
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to fetch stars");
       const repos: string[] = j.repos || [];
