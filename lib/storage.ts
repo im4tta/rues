@@ -20,7 +20,8 @@ export function loadDirectory(): DirectoryData {
     const parsed = JSON.parse(raw);
     return {
       devs: parsed?.devs && typeof parsed.devs === "object" ? parsed.devs : {},
-      repos: parsed?.repos && typeof parsed.repos === "object" ? parsed.repos : {}
+      repos: parsed?.repos && typeof parsed.repos === "object" ? parsed.repos : {},
+      folders: Array.isArray(parsed?.folders) ? parsed.folders : []
     };
   } catch {
     return emptyDirectory();

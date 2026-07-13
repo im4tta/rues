@@ -14,6 +14,8 @@ import {
   Download,
   FileText,
   FolderGit2,
+  Folder,
+  Pencil,
   GitCommit,
   Link,
   Loader2,
@@ -50,10 +52,11 @@ import { DevCard } from "@/components/cards/DevCard";
 import { RepoCard } from "@/components/cards/RepoCard";
 import { RepoBrowser } from "@/components/RepoBrowser";
 import { GraphView } from "@/components/GraphView";
+import { FolderPicker } from "@/components/ui/FolderPicker";
 import Insights from "./Insights";
 
 export default function DevTracker() {
-  const [data, setData] = useState<DirectoryData>({ devs: {}, repos: {} });
+  const [data, setData] = useState<DirectoryData>({ devs: {}, repos: {}, folders: [] });
   const [loaded, setLoaded] = useState(false);
   const [ui, setUI] = useState<UIPrefs>(DEFAULT_UI);
   const [presets, setPresets] = useState<ViewPreset[]>([]);
@@ -99,6 +102,13 @@ export default function DevTracker() {
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState("");
   const [publishResult, setPublishResult] = useState<{ slug: string; url: string } | null>(null);
+
+  // Folder organization (each dev/repo lives in at most one folder).
+  const [activeFolder, setActiveFolder] = useState<string>("all");
+  const [folderInputOpen, setFolderInputOpen] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState("");
 
   useEffect(() => {
     const initial = loadDirectory();
@@ -220,6 +230,58 @@ export default function DevTracker() {
 
   const updateUI = (patch: Partial<UIPrefs>) => setUI((u) => ({ ...u, ...patch }));
 
+  // ---- Folders ----
+  const activeFolderId = activeFolder === "all" || activeFolder === "unfiled" ? undefined : activeFolder;
+
+  const createFolder = () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    const id = `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    persist({ ...data, folders: [...data.folders, { id, name, createdAt: new Date().toISOString() }] });
+    setNewFolderName("");
+    setFolderInputOpen(false);
+  };
+
+  const commitRenameFolder = () => {
+    if (editingFolderId == null) return;
+    const name = editingFolderName.trim();
+    if (!name) {
+      setEditingFolderId(null);
+      return;
+    }
+    persist({
+      ...data,
+      folders: data.folders.map((f) => (f.id === editingFolderId ? { ...f, name } : f)),
+    });
+    setEditingFolderId(null);
+  };
+
+  const deleteFolder = (id: string) => {
+    if (!window.confirm("Delete this folder? Its items move back to Unfiled (they are not removed).")) return;
+    const devs = { ...data.devs };
+    const repos = { ...data.repos };
+    for (const k of Object.keys(devs)) if (devs[k].folderId === id) devs[k] = { ...devs[k], folderId: undefined };
+    for (const k of Object.keys(repos)) if (repos[k].folderId === id) repos[k] = { ...repos[k], folderId: undefined };
+    persist({ ...data, folders: data.folders.filter((f) => f.id !== id), devs, repos });
+    if (activeFolder === id) setActiveFolder("all");
+  };
+
+  const setItemFolder = (kind: "dev" | "repo", id: string, folderId: string | undefined) => {
+    if (kind === "dev") {
+      const dev = data.devs[id];
+      if (dev) persist({ ...data, devs: { ...data.devs, [id]: { ...dev, folderId } } });
+    } else {
+      const repo = data.repos[id];
+      if (repo) persist({ ...data, repos: { ...data.repos, [id]: { ...repo, folderId } } });
+    }
+  };
+
+  const folderMatch = (it: { folderId?: string }) => {
+    if (activeFolder === "all") return true;
+    if (activeFolder === "unfiled") return !it.folderId;
+    return it.folderId === activeFolder;
+  };
+
   const savePreset = (name: string) => {
     const preset: ViewPreset = {
       name,
@@ -291,7 +353,7 @@ export default function DevTracker() {
         ...data,
         devs: {
           ...data.devs,
-          [username]: { ...j, tags: suggested, notes: "", linkedRepos: autoLinkedRepos, addedAt: new Date().toISOString() }
+          [username]: { ...j, tags: suggested, notes: "", linkedRepos: autoLinkedRepos, addedAt: new Date().toISOString(), folderId: activeFolderId }
         },
         repos: nextRepos
       };
@@ -340,7 +402,7 @@ export default function DevTracker() {
         devs: nextDevs,
         repos: {
           ...data.repos,
-          [j.fullName]: { ...j, tags: suggested, notes: "", linkedDevs: autoLinkedDevs, addedAt: new Date().toISOString() }
+          [j.fullName]: { ...j, tags: suggested, notes: "", linkedDevs: autoLinkedDevs, addedAt: new Date().toISOString(), folderId: activeFolderId }
         }
       };
       await persist(next);
@@ -551,7 +613,7 @@ export default function DevTracker() {
       setPastLinks(newPastLinks);
       localStorage.setItem("rues-past-links", JSON.stringify(newPastLinks));
       
-      persist({ devs: restDevs, repos: reposToKeep });
+      persist({ devs: restDevs, repos: reposToKeep, folders: data.folders });
     } else {
       // repo deletion
       const repo = data.repos[deleteModal.fullName];
@@ -591,7 +653,7 @@ export default function DevTracker() {
       setPastLinks(newPastLinks);
       localStorage.setItem("rues-past-links", JSON.stringify(newPastLinks));
       
-      persist({ devs: devsToKeep, repos: restRepos });
+      persist({ devs: devsToKeep, repos: restRepos, folders: data.folders });
     }
     
     setDeleteModal(null);
@@ -614,7 +676,7 @@ export default function DevTracker() {
         ? repo.linkedDevs.filter((u) => u !== username)
         : [...(repo.linkedDevs || []), username]
     };
-    persist({ devs: { ...data.devs, [username]: nextDev }, repos: { ...data.repos, [fullName]: nextRepo } });
+    persist({ devs: { ...data.devs, [username]: nextDev }, repos: { ...data.repos, [fullName]: nextRepo }, folders: data.folders });
   };
 
   const addReposBulk = (incoming: Repo[], username: string) => {
@@ -736,7 +798,8 @@ export default function DevTracker() {
       ) {
         return;
       }
-      persist({ devs: parsed.devs, repos: parsed.repos });
+      persist({ devs: parsed.devs, repos: parsed.repos, folders: Array.isArray(parsed.folders) ? parsed.folders : [] });
+      setActiveFolder("all");
       setToast("Backup restored");
       setTimeout(() => setToast(""), 2500);
     } catch (e: any) {
@@ -988,7 +1051,7 @@ export default function DevTracker() {
             { ...r, linkedDevs: (r.linkedDevs || []).filter((u) => u !== it.data.username) }
           ])
         );
-        next = { devs: restDevs, repos };
+        next = { devs: restDevs, repos, folders: next.folders };
       } else {
         const { [it.data.fullName]: _, ...restRepos } = next.repos;
         const devs = Object.fromEntries(
@@ -997,7 +1060,7 @@ export default function DevTracker() {
             { ...d, linkedRepos: (d.linkedRepos || []).filter((r) => r !== it.data.fullName) }
           ])
         );
-        next = { devs, repos: restRepos };
+        next = { devs, repos: restRepos, folders: next.folders };
       }
     }
     persist(next);
@@ -1054,12 +1117,13 @@ export default function DevTracker() {
   const matches = (text: string) => !q || text.toLowerCase().includes(q);
 
   const devItems: Item[] = Object.values(data.devs)
-    .filter((d) => (ui.filter === "all" || ui.filter === "devs") && matches(d.username + (d.name || "") + (d.tags || []).join(" ")))
+    .filter((d) => (ui.filter === "all" || ui.filter === "devs") && folderMatch(d) && matches(d.username + (d.name || "") + (d.tags || []).join(" ")))
     .map((d) => ({ kind: "dev" as const, id: `dev:${d.username}`, data: d }));
   const repoItems: Item[] = Object.values(data.repos)
     .filter(
       (r) =>
         (ui.filter === "all" || ui.filter === "repos") &&
+        folderMatch(r) &&
         matches(r.fullName + (r.description || "") + (r.tags || []).join(" "))
     )
     .map((r) => ({ kind: "repo" as const, id: `repo:${r.fullName}`, data: r }));
@@ -1074,9 +1138,9 @@ export default function DevTracker() {
   items = sortItems(items, ui.sort);
 
   const graphItems: Item[] = useMemo(() => [
-    ...(ui.filter === "all" || ui.filter === "devs" ? Object.values(data.devs).map((d) => ({ kind: "dev" as const, id: `dev:${d.username}`, data: d })) : []),
-    ...(ui.filter === "all" || ui.filter === "repos" ? Object.values(data.repos).map((r) => ({ kind: "repo" as const, id: `repo:${r.fullName}`, data: r })) : []),
-  ], [data.devs, data.repos, ui.filter]);
+    ...(ui.filter === "all" || ui.filter === "devs" ? Object.values(data.devs).filter(folderMatch).map((d) => ({ kind: "dev" as const, id: `dev:${d.username}`, data: d })) : []),
+    ...(ui.filter === "all" || ui.filter === "repos" ? Object.values(data.repos).filter(folderMatch).map((r) => ({ kind: "repo" as const, id: `repo:${r.fullName}`, data: r })) : []),
+  ], [data.devs, data.repos, ui.filter, activeFolder]);
 
   const allLanguages = useMemo(
     () =>
@@ -1134,6 +1198,8 @@ export default function DevTracker() {
           })
         }
         onBrowse={browsing === null ? () => setBrowsing(it.data.username) : undefined}
+        folders={data.folders}
+        onSetFolder={(folderId) => setItemFolder("dev", it.data.username, folderId)}
       />
     ) : (
       <RepoCard
@@ -1157,6 +1223,8 @@ export default function DevTracker() {
             return n;
           })
         }
+        folders={data.folders}
+        onSetFolder={(folderId) => setItemFolder("repo", it.data.fullName, folderId)}
       />
     );
 
@@ -1554,7 +1622,116 @@ export default function DevTracker() {
           </div>
         )}
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <Folder
+            size={13}
+            className="mr-1 shrink-0 text-[var(--text-3)]"
+          />
+          <span className="mr-1 font-mono text-[11px] uppercase tracking-wider text-[var(--text-3)]">folders</span>
+          <button
+            onClick={() => setActiveFolder("all")}
+            className={`rounded-full px-2.5 py-1 text-[12px] ${
+              activeFolder === "all"
+                ? "bg-[var(--violet-text)] text-white"
+                : "border border-[var(--border)] text-[var(--text-2)] hover:border-[var(--violet-border)] hover:text-[var(--violet-text)]"
+            }`}
+          >
+            All
+          </button>
+          {data.folders.map((f) => {
+            const editing = editingFolderId === f.id;
+            const active = activeFolder === f.id;
+            if (editing) {
+              return (
+                <input
+                  key={f.id}
+                  autoFocus
+                  value={editingFolderName}
+                  onChange={(e) => setEditingFolderName(e.target.value)}
+                  onBlur={commitRenameFolder}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRenameFolder();
+                    if (e.key === "Escape") setEditingFolderId(null);
+                  }}
+                  className="w-28 rounded-full border border-[var(--violet-border)] bg-[var(--surface-input)] px-2.5 py-1 text-[12px] text-[var(--text)] outline-none"
+                />
+              );
+            }
+            return (
+              <span key={f.id} className="group relative inline-flex items-center">
+                <button
+                  onClick={() => setActiveFolder(f.id)}
+                  className={`rounded-full px-2.5 py-1 text-[12px] ${
+                    active
+                      ? "bg-[var(--violet-text)] text-white"
+                      : "border border-[var(--border)] text-[var(--text-2)] hover:border-[var(--violet-border)] hover:text-[var(--violet-text)]"
+                  }`}
+                >
+                  {f.name}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingFolderId(f.id);
+                    setEditingFolderName(f.name);
+                  }}
+                  title="Rename folder"
+                  aria-label={`Rename folder ${f.name}`}
+                  className="ml-0.5 hidden rounded p-0.5 text-[var(--text-3)] hover:text-[var(--violet-text)] group-hover:inline-flex"
+                >
+                  <Pencil size={11} />
+                </button>
+                <button
+                  onClick={() => deleteFolder(f.id)}
+                  title="Delete folder"
+                  aria-label={`Delete folder ${f.name}`}
+                  className="rounded p-0.5 text-[var(--text-3)] hover:text-[var(--danger-text-hover)] group-hover:inline-flex"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            );
+          })}
+          {folderInputOpen ? (
+            <input
+              autoFocus
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onBlur={() => {
+                if (!newFolderName.trim()) setFolderInputOpen(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") createFolder();
+                if (e.key === "Escape") {
+                  setNewFolderName("");
+                  setFolderInputOpen(false);
+                }
+              }}
+              placeholder="folder name…"
+              className="w-32 rounded-full border border-[var(--violet-border)] bg-[var(--surface-input)] px-2.5 py-1 text-[12px] text-[var(--text)] outline-none placeholder-[var(--placeholder)]"
+            />
+          ) : (
+            <button
+              onClick={() => setFolderInputOpen(true)}
+              className="rounded-full border border-dashed border-[var(--border)] px-2.5 py-1 text-[12px] text-[var(--text-3)] hover:border-[var(--violet-border)] hover:text-[var(--violet-text)]"
+            >
+              + New
+            </button>
+          )}
+          {data.folders.length > 0 && (
+            <button
+              onClick={() => setActiveFolder("unfiled")}
+              className={`rounded-full px-2.5 py-1 text-[12px] ${
+                activeFolder === "unfiled"
+                  ? "bg-[var(--surface-2)] text-[var(--text)]"
+                  : "text-[var(--text-3)] hover:text-[var(--text-2)]"
+              }`}
+            >
+              Unfiled
+            </button>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           <div className="flex flex-1 items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5">
             <Search size={13} className="text-[var(--text-3)]" />
             <input

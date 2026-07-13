@@ -13,7 +13,7 @@ import {
   Trash2,
   User
 } from "lucide-react";
-import type { Developer, Repo } from "@/lib/types";
+import type { Developer, Repo, Folder } from "@/lib/types";
 import { buildRepoMarkdown } from "@/lib/obsidian";
 import { formatDateTime, syncLabel } from "@/lib/format";
 import { copyText } from "@/lib/download";
@@ -22,6 +22,7 @@ import { useClickOutside } from "@/hooks/useClickOutside";
 import { Chip } from "@/components/ui/Chip";
 import { TagEditor } from "@/components/ui/TagEditor";
 import { SelectBox } from "@/components/ui/SelectBox";
+import { FolderPicker } from "@/components/ui/FolderPicker";
 import { GraphRail, GraphDot } from "@/components/ui/GraphRail";
 import { StickyNoteCard } from "@/components/ui/StickyNoteCard";
 import { PlatformIcon } from "@/components/ui/PlatformIcon";
@@ -39,7 +40,9 @@ export function RepoCard({
   variant,
   selectable,
   selected,
-  onToggleSelect
+  onToggleSelect,
+  folders,
+  onSetFolder
 }: {
   repo: Repo;
   allDevs: Record<string, Developer>;
@@ -54,6 +57,8 @@ export function RepoCard({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  folders: Folder[];
+  onSetFolder: (folderId: string | undefined) => void;
 }) {
   const [notesBuf, setNotesBuf] = useState(repo.notes || "");
   useEffect(() => setNotesBuf(repo.notes || ""), [repo.notes]);
@@ -113,6 +118,7 @@ export function RepoCard({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <FolderPicker folders={folders} value={repo.folderId} onChange={onSetFolder} compact={compact} />
             {selectable && (
               <SelectBox
                 selected={!!selected}

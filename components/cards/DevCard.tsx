@@ -14,7 +14,7 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import type { Developer, Repo } from "@/lib/types";
+import type { Developer, Repo, Folder } from "@/lib/types";
 import { buildDevMarkdown } from "@/lib/obsidian";
 import { formatDateTime, syncLabel } from "@/lib/format";
 import { copyText } from "@/lib/download";
@@ -22,6 +22,7 @@ import { useClickOutside } from "@/hooks/useClickOutside";
 import { Chip } from "@/components/ui/Chip";
 import { TagEditor } from "@/components/ui/TagEditor";
 import { SelectBox } from "@/components/ui/SelectBox";
+import { FolderPicker } from "@/components/ui/FolderPicker";
 import { GraphRail, GraphDot } from "@/components/ui/GraphRail";
 import { StickyNoteCard } from "@/components/ui/StickyNoteCard";
 
@@ -39,7 +40,9 @@ export function DevCard({
   selectable,
   selected,
   onToggleSelect,
-  onBrowse
+  onBrowse,
+  folders,
+  onSetFolder
 }: {
   dev: Developer;
   allRepos: Record<string, Repo>;
@@ -55,6 +58,8 @@ export function DevCard({
   selected?: boolean;
   onToggleSelect?: () => void;
   onBrowse?: () => void;
+  folders: Folder[];
+  onSetFolder: (folderId: string | undefined) => void;
 }) {
   const [notesBuf, setNotesBuf] = useState(dev.notes || "");
   useEffect(() => setNotesBuf(dev.notes || ""), [dev.notes]);
@@ -124,6 +129,7 @@ export function DevCard({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            <FolderPicker folders={folders} value={dev.folderId} onChange={onSetFolder} compact={compact} />
             {selectable && (
               <SelectBox
                 selected={!!selected}

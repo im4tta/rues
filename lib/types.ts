@@ -5,6 +5,12 @@ export interface StickyNote {
   createdAt: string;
 }
 
+export interface Folder {
+  id: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface Developer {
   username: string;
   name?: string | null;
@@ -17,6 +23,7 @@ export interface Developer {
   linkedRepos: string[];
   lastSynced?: string;
   addedAt: string;
+  folderId?: string;
   isMe?: boolean;
   isContributor?: boolean;
   contributions?: number;
@@ -35,15 +42,17 @@ export interface Repo {
   linkedDevs: string[];
   lastSynced?: string;
   addedAt: string;
+  folderId?: string;
   stickyNotes?: StickyNote[];
 }
 
 export interface DirectoryData {
   devs: Record<string, Developer>;
   repos: Record<string, Repo>;
+  folders: Folder[];
 }
 
-export const emptyDirectory = (): DirectoryData => ({ devs: {}, repos: {} });
+export const emptyDirectory = (): DirectoryData => ({ devs: {}, repos: {}, folders: [] });
 
 export type Item = { kind: "dev"; id: string; data: Developer } | { kind: "repo"; id: string; data: Repo };
 export type SortKey = "name" | "stars" | "lastSynced" | "addedAt";
