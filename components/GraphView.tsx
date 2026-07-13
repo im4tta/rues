@@ -830,7 +830,7 @@ export const GraphView = React.memo(function GraphView({
       ctx.restore();
 
       // --- Footer (bottom) ---
-      const footer = "Rues (ឫស) · github.com/im4tta/rues";
+      const footer = "Rues (ឫស)";
       ctx.font = "500 12px 'JetBrains Mono', monospace";
       const fw = ctx.measureText(footer).width;
       const fpad = 12;
