@@ -256,8 +256,8 @@ export default function DevTracker() {
     savePresets(next);
   };
 
-  const addDev = async () => {
-    const username = newDev.trim().replace(/^@/, "");
+  const addDev = async (presetUsername?: string) => {
+    const username = (presetUsername ?? newDev).trim().replace(/^@/, "");
     if (!username) return;
     if (data.devs[username]) return showError(`@${username} is already tracked`);
 
@@ -1340,7 +1340,7 @@ export default function DevTracker() {
               className="flex-1 bg-transparent text-[12px] text-[var(--text)] outline-none placeholder-[var(--placeholder)]"
             />
             <button
-              onClick={addDev}
+              onClick={() => addDev()}
               disabled={busy[`dev:${newDev.trim()}`]}
               aria-label="Add developer"
               className="text-[var(--mint-text)] hover:text-[var(--mint-text-hover)] disabled:opacity-50"
@@ -1821,7 +1821,7 @@ export default function DevTracker() {
         ) : ui.view === "insights" ? (
           <Insights items={items} digest={buildDigest(data)} />
         ) : ui.view === "graph" ? (
-          <GraphView items={graphItems} langFilter={ui.langFilter} onLangFilterChange={(lang) => updateUI({ langFilter: lang })} setToast={setToast} onExportSubgraph={exportSubgraph} />
+          <GraphView items={graphItems} langFilter={ui.langFilter} onLangFilterChange={(lang) => updateUI({ langFilter: lang })} setToast={setToast} onExportSubgraph={exportSubgraph} onAddDev={addDev} />
         ) : useVirtual ? (
           <VirtualList items={items} renderItem={renderItem} estimate={compact ? 150 : 210} gap={gap} />
         ) : ui.group !== "none" ? (

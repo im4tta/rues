@@ -9,6 +9,7 @@ import {
   FolderGit2,
   GitCommit,
   Loader2,
+  Plus,
   Search,
   Shuffle,
   Star,
@@ -26,13 +27,14 @@ import { Chip } from "@/components/ui/Chip";
 import { StickyNoteCard } from "@/components/ui/StickyNoteCard";
 
 export const GraphView = React.memo(function GraphView({
-  items, langFilter, onLangFilterChange, setToast, onExportSubgraph
+  items: _items, langFilter, onLangFilterChange, setToast, onExportSubgraph, onAddDev
 }: {
   items: Item[];
   langFilter: string;
   onLangFilterChange: (lang: string) => void;
   setToast: (s: string) => void;
   onExportSubgraph?: (ids: string[]) => void;
+  onAddDev?: (username: string) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
@@ -65,6 +67,85 @@ export const GraphView = React.memo(function GraphView({
   const selectionRectRef = useRef<SVGRectElement | null>(null);
   const [hover, setHover] = useState<{ item: Item | null; x: number; y: number } | null>(null);
   const [activity, setActivity] = useState<{ loading: boolean; error?: string; events: any[] }>({ loading: false, events: [] });
+
+  // Contributors overlay: fetch repo contributors and show them as connected nodes.
+  type Contributor = { login: string; avatar_url: string; contributions: number; html_url: string };
+  const [showContributors, setShowContributors] = useState(false);
+  const [contributors, setContributors] = useState<Record<string, Contributor[]>>({});
+  const [contribLoading, setContribLoading] = useState(false);
+
+  const isContribId = (id: string) => id.startsWith("contrib:");
+
+  // Augment the item list with contributor pseudo-devs when the overlay is on.
+  const items = useMemo<Item[]>(() => {
+    if (!showContributors) return _items;
+    const extra: Item[] = [];
+    for (const it of _items) {
+      if (it.kind !== "repo") continue;
+      const cs = contributors[it.data.fullName];
+      if (!cs) continue;
+      for (const c of cs) {
+        extra.push({
+          kind: "dev",
+          id: `contrib:${it.data.fullName}:${c.login}`,
+          data: {
+            username: c.login,
+            name: c.login,
+            avatar_url: c.avatar_url,
+            bio: `Contributor · ${c.contributions} commits`,
+            tags: [],
+            notes: "",
+            linkedRepos: [it.data.fullName],
+            linkedDevs: [],
+            addedAt: "",
+            isContributor: true,
+            contributions: c.contributions,
+          } as any,
+        });
+      }
+    }
+    return [..._items, ...extra];
+  }, [_items, showContributors, contributors]);
+
+  // Fetch contributors for repos that haven't been loaded yet.
+  const repoNamesKey = useMemo(
+    () => _items.filter((i) => i.kind === "repo").map((i) => (i.data as any).fullName).join("|"),
+    [_items]
+  );
+  useEffect(() => {
+    if (!showContributors) return;
+    const names = repoNamesKey ? repoNamesKey.split("|") : [];
+    const missing = names.filter((n) => n && !contributors[n]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    setContribLoading(true);
+    (async () => {
+      const results: Array<[string, Contributor[]]> = await Promise.all(
+        missing.map(async (n) => {
+          const [o, r] = n.split("/");
+          try {
+            const res = await fetch(`/api/github/repo/${o}/${r}/contributors`);
+            if (!res.ok) return [n, [] as Contributor[]];
+            const j = await res.json();
+            return [n, (j.contributors || []) as Contributor[]];
+          } catch {
+            return [n, [] as Contributor[]];
+          }
+        })
+      );
+      if (cancelled) return;
+      setContributors((prev) => {
+        const next = { ...prev };
+        for (const [n, cs] of results) next[n] = cs;
+        return next;
+      });
+      setContribLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showContributors, repoNamesKey]);
 
   useClickOutside(detailRef, () => setSelected(null), !!selected);
 
@@ -256,12 +337,14 @@ export const GraphView = React.memo(function GraphView({
     zoomRef.current = zoom;
 
     const radiusFn = (d: any) => {
+      if (isContribId(d.id)) return 4.5;
       if (sizeBy === "equal") return 9;
       const base = 8;
       return base + Math.min(degree.get(d.id) || 0, 10) * 1.4;
     };
 
     const colorFn = (d: any) => {
+      if (isContribId(d.id)) return "var(--amber-text)";
       if (colorBy === "cluster") return clusterColor(d.cluster ?? 0);
       if (colorBy === "language") {
         if (d.type === "dev") return "var(--violet-text)";
@@ -484,6 +567,7 @@ export const GraphView = React.memo(function GraphView({
   useEffect(() => {
     if (!nodeSelectionRef.current) return;
     const radiusFn = (d: any) => {
+      if (isContribId(d.id)) return 4.5;
       if (sizeBy === "equal") return 9;
       return 8 + Math.min(degree.get(d.id) || 0, 10) * 1.4;
     };
@@ -1015,14 +1099,21 @@ export const GraphView = React.memo(function GraphView({
             <button onClick={() => setFocusMode((v) => !v)} className={optBtn(focusMode)} title="Focus mode — dim unconnected nodes">
               focus
             </button>
+            <button
+              onClick={() => setShowContributors((v) => !v)}
+              className={optBtn(showContributors)}
+              title="Show repo contributors as connected nodes (like Obsidian)"
+            >
+              {contribLoading ? <Loader2 size={11} className="animate-spin" /> : <Users size={11} />} contrib
+            </button>
             <div ref={exportAreaRef}>
               {showExportPopup && <div className="fixed inset-0 z-40" onClick={() => setShowExportPopup(false)} />}
-              <div className={`fixed z-[100] ${isMobile && selectedItem ? "right-3 top-3" : "bottom-20 right-4"}`}>
+              <div className={`fixed z-[200] ${isMobile && selectedItem ? "right-3 top-3" : selectedItem ? (detailSide === "right" ? "bottom-20 left-4" : "bottom-20 right-4") : "bottom-20 right-4"}`}>
                 <button onClick={() => setShowExportPopup((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] shadow-lg hover:text-[var(--text)] hover:shadow-xl" title="Export as PNG">
                   <Download size={12} />
                 </button>
                 {showExportPopup && (
-                  <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[100]" : "absolute right-0 bottom-full mb-2 z-[100]"} flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
+                  <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[200]" : "absolute right-0 bottom-full mb-2 z-[200]"} flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
                     <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                       Dark background
@@ -1128,9 +1219,41 @@ export const GraphView = React.memo(function GraphView({
                 </button>
               </div>
             </div>
-            <div className="list-scroll space-y-3 overflow-y-auto px-4 pb-4 pt-1 text-[12px]">
-              {selectedItem.kind === "dev" ? (
-                <>
+              <div className="list-scroll space-y-3 overflow-y-auto px-4 pb-4 pt-1 text-[12px]">
+                {selectedItem.kind === "dev" && (selectedItem.data as any).isContributor ? (
+                  <>
+                    <div className="flex items-center gap-3">
+                      {selectedItem.data.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={selectedItem.data.avatar_url} alt="" className="h-10 w-10 rounded-full border border-[var(--border-subtle)]" />
+                      ) : (
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--amber-text)]"><Users size={16} /></div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-display text-[15px] font-semibold text-[var(--text)]">{selectedItem.data.username}</div>
+                        <span className="rounded-full bg-[var(--amber-bg)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--amber-text)]">contributor</span>
+                      </div>
+                    </div>
+                    <p className="text-[var(--text-2)]">
+                      {selectedItem.data.contributions} commits
+                      {(selectedItem.data.linkedRepos || []).length > 0 && <> · on {(selectedItem.data.linkedRepos || []).join(", ")}</>}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <a href={`https://github.com/${selectedItem.data.username}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 font-mono text-[11px] text-[var(--text-2)] hover:text-[var(--text)]">
+                        <ExternalLink size={10} /> profile
+                      </a>
+                    </div>
+                    {onAddDev && (
+                      <button
+                        onClick={() => onAddDev(selectedItem.data.username)}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-[var(--violet-text)] px-3 py-1.5 text-[12px] text-[var(--violet-text)] hover:bg-[var(--violet-text)] hover:text-white"
+                      >
+                        <Plus size={12} /> Add to tracking
+                      </button>
+                    )}
+                  </>
+                ) : selectedItem.kind === "dev" ? (
+                  <>
                   <div>
                     <div className="font-display text-[15px] font-semibold text-[var(--text)]">
                       {selectedItem.data.name || selectedItem.data.username}

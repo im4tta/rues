@@ -18,6 +18,8 @@ export interface Developer {
   lastSynced?: string;
   addedAt: string;
   isMe?: boolean;
+  isContributor?: boolean;
+  contributions?: number;
   stickyNotes?: StickyNote[];
 }
 
