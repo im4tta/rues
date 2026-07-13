@@ -1,7 +1,7 @@
 "use client";
 
 import type { DirectoryData, ViewPreset } from "./types";
-import { emptyDirectory } from "./types";
+import { cleanDirectory, emptyDirectory } from "./types";
 
 // Filesystem storage (data/directory.json) doesn't work on Vercel — serverless
 // functions get a fresh, read-only filesystem per invocation, so nothing written
@@ -18,11 +18,11 @@ export function loadDirectory(): DirectoryData {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyDirectory();
     const parsed = JSON.parse(raw);
-    return {
+    return cleanDirectory({
       devs: parsed?.devs && typeof parsed.devs === "object" ? parsed.devs : {},
       repos: parsed?.repos && typeof parsed.repos === "object" ? parsed.repos : {},
       folders: Array.isArray(parsed?.folders) ? parsed.folders : []
-    };
+    });
   } catch {
     return emptyDirectory();
   }

@@ -54,6 +54,23 @@ export interface DirectoryData {
 
 export const emptyDirectory = (): DirectoryData => ({ devs: {}, repos: {}, folders: [] });
 
+/** Removes entries with empty/invalid keys and ensures data integrity */
+export function cleanDirectory(data: DirectoryData): DirectoryData {
+  const devs: Record<string, Developer> = {};
+  for (const [key, dev] of Object.entries(data.devs)) {
+    if (key && dev.username) {
+      devs[key] = dev;
+    }
+  }
+  const repos: Record<string, Repo> = {};
+  for (const [key, repo] of Object.entries(data.repos)) {
+    if (key && repo.fullName) {
+      repos[key] = repo;
+    }
+  }
+  return { devs, repos, folders: Array.isArray(data.folders) ? data.folders : [] };
+}
+
 export type Item = { kind: "dev"; id: string; data: Developer } | { kind: "repo"; id: string; data: Repo };
 export type SortKey = "name" | "stars" | "lastSynced" | "addedAt";
 export type GroupKey = "none" | "tag" | "linked";

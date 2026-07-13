@@ -57,6 +57,8 @@ import Insights from "./Insights";
 
 export default function DevTracker() {
   const [data, setData] = useState<DirectoryData>({ devs: {}, repos: {}, folders: [] });
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const [loaded, setLoaded] = useState(false);
   const [ui, setUI] = useState<UIPrefs>(DEFAULT_UI);
   const [presets, setPresets] = useState<ViewPreset[]>([]);
@@ -258,21 +260,23 @@ export default function DevTracker() {
 
   const deleteFolder = (id: string) => {
     if (!window.confirm("Delete this folder? Its items move back to Unfiled (they are not removed).")) return;
-    const devs = { ...data.devs };
-    const repos = { ...data.repos };
+    const d = dataRef.current;
+    const devs = { ...d.devs };
+    const repos = { ...d.repos };
     for (const k of Object.keys(devs)) if (devs[k].folderId === id) devs[k] = { ...devs[k], folderId: undefined };
     for (const k of Object.keys(repos)) if (repos[k].folderId === id) repos[k] = { ...repos[k], folderId: undefined };
-    persist({ ...data, folders: data.folders.filter((f) => f.id !== id), devs, repos });
+    persist({ ...d, folders: d.folders.filter((f) => f.id !== id), devs, repos });
     if (activeFolder === id) setActiveFolder("all");
   };
 
   const setItemFolder = (kind: "dev" | "repo", id: string, folderId: string | undefined) => {
+    const d = dataRef.current;
     if (kind === "dev") {
-      const dev = data.devs[id];
-      if (dev) persist({ ...data, devs: { ...data.devs, [id]: { ...dev, folderId } } });
+      const dev = d.devs[id];
+      if (dev) persist({ ...d, devs: { ...d.devs, [id]: { ...dev, folderId } } });
     } else {
-      const repo = data.repos[id];
-      if (repo) persist({ ...data, repos: { ...data.repos, [id]: { ...repo, folderId } } });
+      const repo = d.repos[id];
+      if (repo) persist({ ...d, repos: { ...d.repos, [id]: { ...repo, folderId } } });
     }
   };
 
@@ -323,7 +327,8 @@ export default function DevTracker() {
   const addDev = async (presetUsername?: string) => {
     const username = (presetUsername ?? newDev).trim().replace(/^@/, "");
     if (!username) return;
-    if (data.devs[username]) return showError(`@${username} is already tracked`);
+    const current = dataRef.current;
+    if (current.devs[username]) return showError(`@${username} is already tracked`);
 
     setBusy((b) => ({ ...b, [`dev:${username}`]: true }));
     try {
@@ -332,13 +337,14 @@ export default function DevTracker() {
       if (!res.ok) throw new Error(j.error || "Failed to fetch user");
       
       // Auto link to existing repos that were linked in pastLinks
+      const latest = dataRef.current;
       const existingPastLinksForDev = pastLinks.filter(
-        p => p.dev === username && data.repos[p.repo]
+        p => p.dev === username && latest.repos[p.repo]
       );
       const autoLinkedRepos = existingPastLinksForDev.map(p => p.repo);
       
       // Also update repos to link back to dev
-      const nextRepos = { ...data.repos };
+      const nextRepos = { ...latest.repos };
       for (const repoName of autoLinkedRepos) {
         if (!nextRepos[repoName].linkedDevs.includes(username)) {
           nextRepos[repoName] = {
@@ -350,9 +356,9 @@ export default function DevTracker() {
       
       const suggested = suggestDevTags(j, []);
       const next: DirectoryData = {
-        ...data,
+        ...latest,
         devs: {
-          ...data.devs,
+          ...latest.devs,
           [username]: { ...j, tags: suggested, notes: "", linkedRepos: autoLinkedRepos, addedAt: new Date().toISOString(), folderId: activeFolderId }
         },
         repos: nextRepos
@@ -370,7 +376,8 @@ export default function DevTracker() {
   const addRepo = async () => {
     const input = newRepo.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/$/, "");
     if (!input || !input.includes("/")) return showError('Use "owner/repo" format');
-    if (data.repos[input]) return showError(`${input} is already tracked`);
+    const current = dataRef.current;
+    if (current.repos[input]) return showError(`${input} is already tracked`);
 
     const [owner, repo] = input.split("/");
     setBusy((b) => ({ ...b, [`repo:${input}`]: true }));
@@ -379,14 +386,13 @@ export default function DevTracker() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to fetch repo");
       
-      // Auto link to existing devs that were linked in pastLinks
+      const latest = dataRef.current;
       const existingPastLinksForRepo = pastLinks.filter(
-        p => p.repo === j.fullName && data.devs[p.dev]
+        p => p.repo === j.fullName && latest.devs[p.dev]
       );
       const autoLinkedDevs = existingPastLinksForRepo.map(p => p.dev);
       
-      // Also update devs to link back to repo
-      const nextDevs = { ...data.devs };
+      const nextDevs = { ...latest.devs };
       for (const username of autoLinkedDevs) {
         if (!nextDevs[username].linkedRepos.includes(j.fullName)) {
           nextDevs[username] = {
@@ -398,10 +404,10 @@ export default function DevTracker() {
       
       const suggested = suggestRepoTags(j);
       const next: DirectoryData = {
-        ...data,
+        ...latest,
         devs: nextDevs,
         repos: {
-          ...data.repos,
+          ...latest.repos,
           [j.fullName]: { ...j, tags: suggested, notes: "", linkedDevs: autoLinkedDevs, addedAt: new Date().toISOString(), folderId: activeFolderId }
         }
       };
@@ -572,11 +578,11 @@ export default function DevTracker() {
   const confirmDelete = () => {
     if (!deleteModal) return;
     
-    // Save past links first
+    const d = dataRef.current;
     const newPastLinks = [...pastLinks];
     
     if (deleteModal.type === "dev") {
-      const dev = data.devs[deleteModal.username];
+      const dev = d.devs[deleteModal.username];
       const linkedRepos = (dev?.linkedRepos || []);
       for (const repo of linkedRepos) {
         if (!newPastLinks.find(p => p.dev === deleteModal.username && p.repo === repo)) {
@@ -585,11 +591,10 @@ export default function DevTracker() {
       }
       
       // Delete selected linked repos
-      let reposToKeep = { ...data.repos };
+      let reposToKeep = { ...d.repos };
       for (const repoName of deleteModal.linkedItemsToDelete) {
         delete reposToKeep[repoName];
-        // Also save past links for any other devs linked to the deleted repo
-        const repoData = data.repos[repoName];
+        const repoData = d.repos[repoName];
         for (const linkedDev of (repoData?.linkedDevs || [])) {
           if (linkedDev !== deleteModal.username) {
             if (!newPastLinks.find(p => p.dev === linkedDev && p.repo === repoName)) {
@@ -599,7 +604,6 @@ export default function DevTracker() {
         }
       }
       
-      // Now, remove links from remaining repos
       reposToKeep = Object.fromEntries(
         Object.entries(reposToKeep).map(([k, r]) => [
           k,
@@ -607,16 +611,14 @@ export default function DevTracker() {
         ])
       );
       
-      // Delete dev
-      const { [deleteModal.username]: _, ...restDevs } = data.devs;
+      const { [deleteModal.username]: _, ...restDevs } = d.devs;
       
       setPastLinks(newPastLinks);
       localStorage.setItem("rues-past-links", JSON.stringify(newPastLinks));
       
-      persist({ devs: restDevs, repos: reposToKeep, folders: data.folders });
+      persist({ devs: restDevs, repos: reposToKeep, folders: d.folders });
     } else {
-      // repo deletion
-      const repo = data.repos[deleteModal.fullName];
+      const repo = d.repos[deleteModal.fullName];
       const linkedDevs = (repo?.linkedDevs || []);
       for (const dev of linkedDevs) {
         if (!newPastLinks.find(p => p.dev === dev && p.repo === deleteModal.fullName)) {
@@ -624,12 +626,10 @@ export default function DevTracker() {
         }
       }
       
-      // Delete selected linked devs
-      let devsToKeep = { ...data.devs };
+      let devsToKeep = { ...d.devs };
       for (const username of deleteModal.linkedItemsToDelete) {
         delete devsToKeep[username];
-        // Also save past links for other repos linked to deleted dev
-        const devData = data.devs[username];
+        const devData = d.devs[username];
         for (const linkedRepo of (devData?.linkedRepos || [])) {
           if (linkedRepo !== deleteModal.fullName) {
             if (!newPastLinks.find(p => p.dev === username && p.repo === linkedRepo)) {
@@ -639,21 +639,19 @@ export default function DevTracker() {
         }
       }
       
-      // Remove links from remaining devs
       devsToKeep = Object.fromEntries(
-        Object.entries(devsToKeep).map(([k, d]) => [
+        Object.entries(devsToKeep).map(([k, d2]) => [
           k,
-          { ...d, linkedRepos: (d.linkedRepos || []).filter((r) => r !== deleteModal.fullName) }
+          { ...d2, linkedRepos: (d2.linkedRepos || []).filter((r) => r !== deleteModal.fullName) }
         ])
       );
       
-      // Delete repo
-      const { [deleteModal.fullName]: _, ...restRepos } = data.repos;
+      const { [deleteModal.fullName]: _, ...restRepos } = d.repos;
       
       setPastLinks(newPastLinks);
       localStorage.setItem("rues-past-links", JSON.stringify(newPastLinks));
       
-      persist({ devs: devsToKeep, repos: restRepos, folders: data.folders });
+      persist({ devs: devsToKeep, repos: restRepos, folders: d.folders });
     }
     
     setDeleteModal(null);
@@ -900,12 +898,12 @@ export default function DevTracker() {
       setImportResults([...results]);
     }
 
-    // Build case-insensitive lookup for existing repo keys
+    const latest = dataRef.current;
     const repoKeyByLower = new Map<string, string>();
-    for (const k of Object.keys(data.repos)) repoKeyByLower.set(k.toLowerCase(), k);
+    for (const k of Object.keys(latest.repos)) repoKeyByLower.set(k.toLowerCase(), k);
 
     // Phase 3: merge fetched data into next, preserving local tags/notes
-    let next = { ...data };
+    let next = { ...latest };
     let changed = false;
 
     for (const username of Object.keys(fetchedDevs)) {
@@ -1024,14 +1022,15 @@ export default function DevTracker() {
 
   // Bulk operations ---------------------------------------------------------
   const idsToItems = (ids: Iterable<string>): Item[] => {
+    const d = dataRef.current;
     const out: Item[] = [];
     for (const id of ids) {
       if (id.startsWith("dev:")) {
         const u = id.slice(4);
-        if (data.devs[u]) out.push({ kind: "dev", id, data: data.devs[u] });
+        if (d.devs[u]) out.push({ kind: "dev", id, data: d.devs[u] });
       } else if (id.startsWith("repo:")) {
         const f = id.slice(5);
-        if (data.repos[f]) out.push({ kind: "repo", id, data: data.repos[f] });
+        if (d.repos[f]) out.push({ kind: "repo", id, data: d.repos[f] });
       }
     }
     return out;
@@ -1117,11 +1116,12 @@ export default function DevTracker() {
   const matches = (text: string) => !q || text.toLowerCase().includes(q);
 
   const devItems: Item[] = Object.values(data.devs)
-    .filter((d) => (ui.filter === "all" || ui.filter === "devs") && folderMatch(d) && matches(d.username + (d.name || "") + (d.tags || []).join(" ")))
+    .filter((d) => d.username && (ui.filter === "all" || ui.filter === "devs") && folderMatch(d) && matches(d.username + (d.name || "") + (d.tags || []).join(" ")))
     .map((d) => ({ kind: "dev" as const, id: `dev:${d.username}`, data: d }));
   const repoItems: Item[] = Object.values(data.repos)
     .filter(
       (r) =>
+        r.fullName &&
         (ui.filter === "all" || ui.filter === "repos") &&
         folderMatch(r) &&
         matches(r.fullName + (r.description || "") + (r.tags || []).join(" "))
@@ -1138,8 +1138,8 @@ export default function DevTracker() {
   items = sortItems(items, ui.sort);
 
   const graphItems: Item[] = useMemo(() => [
-    ...(ui.filter === "all" || ui.filter === "devs" ? Object.values(data.devs).filter(folderMatch).map((d) => ({ kind: "dev" as const, id: `dev:${d.username}`, data: d })) : []),
-    ...(ui.filter === "all" || ui.filter === "repos" ? Object.values(data.repos).filter(folderMatch).map((r) => ({ kind: "repo" as const, id: `repo:${r.fullName}`, data: r })) : []),
+    ...(ui.filter === "all" || ui.filter === "devs" ? Object.values(data.devs).filter((d) => d.username && folderMatch(d)).map((d) => ({ kind: "dev" as const, id: `dev:${d.username}`, data: d })) : []),
+    ...(ui.filter === "all" || ui.filter === "repos" ? Object.values(data.repos).filter((r) => r.fullName && folderMatch(r)).map((r) => ({ kind: "repo" as const, id: `repo:${r.fullName}`, data: r })) : []),
   ], [data.devs, data.repos, ui.filter, activeFolder]);
 
   const allLanguages = useMemo(
