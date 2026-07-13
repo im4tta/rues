@@ -1,6 +1,6 @@
 "use client";
 
-import type { DirectoryData } from "./types";
+import type { DirectoryData, ViewPreset } from "./types";
 import { emptyDirectory } from "./types";
 
 // Filesystem storage (data/directory.json) doesn't work on Vercel — serverless
@@ -35,5 +35,28 @@ export function saveDirectory(data: DirectoryData): boolean {
   } catch {
     // Most likely private-browsing mode or quota exceeded.
     return false;
+  }
+}
+
+const PRESETS_KEY = "dev-directory:presets:v1";
+
+export function loadPresets(): ViewPreset[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PRESETS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePresets(presets: ViewPreset[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PRESETS_KEY, JSON.stringify(presets));
+  } catch {
+    /* ignore */
   }
 }

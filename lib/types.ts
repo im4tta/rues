@@ -56,3 +56,15 @@ export type UIPrefs = {
   tagFilter: string[];
   hasNotesOnly: boolean;
 };
+
+export type ViewPreset = {
+  name: string;
+  filter: UIPrefs["filter"];
+  view: UIPrefs["view"];
+  sort: SortKey;
+  group: GroupKey;
+  density: Density;
+  langFilter: string;
+  tagFilter: string[];
+  hasNotesOnly: boolean;
+};

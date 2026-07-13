@@ -22,23 +22,25 @@ import {
   RefreshCw,
   Search,
   SlidersHorizontal,
+  Star,
   Sun,
   Tag as TagIcon,
   Upload,
   User,
   X
 } from "lucide-react";
-import type { Developer, Repo, DirectoryData, Item, Density, UIPrefs } from "@/lib/types";
+import type { Developer, Repo, DirectoryData, Item, Density, UIPrefs, ViewPreset } from "@/lib/types";
 import { DEFAULT_UI, VIRTUALIZE_THRESHOLD } from "@/lib/constants";
 import { sortItems, buildSections } from "@/lib/sort";
 import { downloadFile } from "@/lib/download";
-import { loadDirectory, saveDirectory } from "@/lib/storage";
+import { loadDirectory, saveDirectory, loadPresets, savePresets } from "@/lib/storage";
 import {
   buildDevMarkdown,
   buildRepoMarkdown,
   buildDevMarkdownMd,
   buildRepoMarkdownMd
 } from "@/lib/obsidian";
+import { suggestDevTags, suggestRepoTags, buildDigest } from "@/lib/analytics";
 import { Dropdown, MenuGroup, SegBtn } from "@/components/ui/Dropdown";
 import { VirtualList } from "@/components/ui/VirtualList";
 import { DevCard } from "@/components/cards/DevCard";
@@ -51,6 +53,7 @@ export default function DevTracker() {
   const [data, setData] = useState<DirectoryData>({ devs: {}, repos: {} });
   const [loaded, setLoaded] = useState(false);
   const [ui, setUI] = useState<UIPrefs>(DEFAULT_UI);
+  const [presets, setPresets] = useState<ViewPreset[]>([]);
   const [query, setQuery] = useState("");
   const [newDev, setNewDev] = useState("");
   const [newRepo, setNewRepo] = useState("");
@@ -79,6 +82,7 @@ export default function DevTracker() {
   const importMdInputRef = useRef<HTMLInputElement>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState("");
+  const [starredUser, setStarredUser] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importResults, setImportResults] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -89,6 +93,7 @@ export default function DevTracker() {
     historyRef.current = [initial];
     setHistoryIdx(0);
     setLoaded(true);
+    setPresets(loadPresets());
   }, []);
 
   // Restore persisted UI preferences.
@@ -201,6 +206,44 @@ export default function DevTracker() {
 
   const updateUI = (patch: Partial<UIPrefs>) => setUI((u) => ({ ...u, ...patch }));
 
+  const savePreset = (name: string) => {
+    const preset: ViewPreset = {
+      name,
+      filter: ui.filter,
+      view: ui.view,
+      sort: ui.sort,
+      group: ui.group,
+      density: ui.density,
+      langFilter: ui.langFilter,
+      tagFilter: [...ui.tagFilter],
+      hasNotesOnly: ui.hasNotesOnly,
+    };
+    const next = [...presets.filter((p) => p.name !== name), preset];
+    setPresets(next);
+    savePresets(next);
+    setToast(`Saved view “${name}”`);
+    setTimeout(() => setToast(""), 2500);
+  };
+
+  const applyPreset = (preset: ViewPreset) => {
+    updateUI({
+      filter: preset.filter,
+      view: preset.view,
+      sort: preset.sort,
+      group: preset.group,
+      density: preset.density,
+      langFilter: preset.langFilter,
+      tagFilter: [...preset.tagFilter],
+      hasNotesOnly: preset.hasNotesOnly,
+    });
+  };
+
+  const deletePreset = (name: string) => {
+    const next = presets.filter((p) => p.name !== name);
+    setPresets(next);
+    savePresets(next);
+  };
+
   const addDev = async () => {
     const username = newDev.trim().replace(/^@/, "");
     if (!username) return;
@@ -229,15 +272,18 @@ export default function DevTracker() {
         }
       }
       
+      const suggested = suggestDevTags(j, []);
       const next: DirectoryData = {
         ...data,
         devs: {
           ...data.devs,
-          [username]: { ...j, tags: [], notes: "", linkedRepos: autoLinkedRepos, addedAt: new Date().toISOString() }
+          [username]: { ...j, tags: suggested, notes: "", linkedRepos: autoLinkedRepos, addedAt: new Date().toISOString() }
         },
         repos: nextRepos
       };
       await persist(next);
+      if (suggested.length) setToast(`@${username} added · auto-tags: ${suggested.join(", ")}`);
+      setTimeout(() => setToast(""), 3000);
       setNewDev("");
     } catch (e: any) {
       showError(e.message);
@@ -274,15 +320,18 @@ export default function DevTracker() {
         }
       }
       
+      const suggested = suggestRepoTags(j);
       const next: DirectoryData = {
         ...data,
         devs: nextDevs,
         repos: {
           ...data.repos,
-          [j.fullName]: { ...j, tags: [], notes: "", linkedDevs: autoLinkedDevs, addedAt: new Date().toISOString() }
+          [j.fullName]: { ...j, tags: suggested, notes: "", linkedDevs: autoLinkedDevs, addedAt: new Date().toISOString() }
         }
       };
       await persist(next);
+      if (suggested.length) setToast(`${j.fullName} added · auto-tags: ${suggested.join(", ")}`);
+      setTimeout(() => setToast(""), 3000);
       setNewRepo("");
     } catch (e: any) {
       showError(e.message);
@@ -796,6 +845,28 @@ export default function DevTracker() {
     }
   };
 
+  const importStarred = async () => {
+    const username = starredUser.trim().replace(/^@/, "");
+    if (!username) return;
+    setImportBusy(true);
+    setImportResults([`Fetching @${username}'s starred repos…`]);
+    try {
+      const res = await fetch(`/api/github/user/${username}/starred`);
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Failed to fetch stars");
+      const repos: string[] = j.repos || [];
+      if (repos.length === 0) {
+        setImportResults(["No starred repos found (or they're private)."]);
+      } else {
+        // Reuse the import pipeline by feeding the full_name list as text.
+        await runImport(repos.map((r) => `https://github.com/${r}`).join("\n"));
+      }
+    } catch (e: any) {
+      setImportResults([`❌ ${e.message}`]);
+    }
+    setImportBusy(false);
+  };
+
   // Bulk operations ---------------------------------------------------------
   const idsToItems = (ids: Iterable<string>): Item[] => {
     const out: Item[] = [];
@@ -1110,6 +1181,14 @@ export default function DevTracker() {
                   >
                     <Upload size={13} className="text-[var(--amber-text)]" /> Restore (JSON)
                   </button>
+                  <a
+                    href="/share"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--text-soft)] hover:bg-[var(--surface-2)]"
+                  >
+                    <Upload size={13} className="text-[var(--mint-text)]" /> Publish / Share page
+                  </a>
                 </>
               )}
             </Dropdown>
@@ -1231,6 +1310,23 @@ export default function DevTracker() {
                     className="flex items-center gap-1.5 rounded-md border border-[var(--border)] px-3 py-1.5 text-[12px] text-[var(--text-3)] hover:border-[var(--mint-text)] hover:text-[var(--mint-text)]"
                   >
                     <Upload size={13} /> Upload .md file
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 border-t border-[var(--border)] pt-3">
+                  <input
+                    value={starredUser}
+                    onChange={(e) => setStarredUser(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && importStarred()}
+                    placeholder="github username"
+                    className="flex-1 rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-[12px] text-[var(--text)] outline-none placeholder-[var(--placeholder)]"
+                  />
+                  <button
+                    onClick={importStarred}
+                    disabled={importBusy || !starredUser.trim()}
+                    className="flex items-center gap-1.5 rounded-md border border-[var(--mint-text)] px-3 py-1.5 text-[12px] text-[var(--mint-text)] hover:bg-[var(--mint-text)] hover:text-white disabled:opacity-40"
+                  >
+                    {importBusy ? <Loader2 size={13} className="animate-spin" /> : <Star size={13} />}
+                    Import ⭐
                   </button>
                 </div>
                 {importResults.length > 0 && (
@@ -1365,6 +1461,44 @@ export default function DevTracker() {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline-block align-text-bottom"><path d="M3 3v18h18"/><path d="M7 15l3-4 3 3 4-6"/></svg> insights
                   </SegBtn>
                 </MenuGroup>
+                <MenuGroup label="Saved views">
+                  {presets.length === 0 && (
+                    <span className="block px-1 py-1 text-[11px] text-[var(--text-3)]">No saved views yet</span>
+                  )}
+                  {presets.map((p) => (
+                    <div key={p.name} className="flex items-center justify-between gap-1 rounded px-1 py-0.5 hover:bg-[var(--surface-2)]">
+                      <button
+                        onClick={() => {
+                          applyPreset(p);
+                          close();
+                        }}
+                        className="flex-1 truncate text-left text-[12px] text-[var(--text-soft)]"
+                        title={`Apply “${p.name}”`}
+                      >
+                        {p.name}
+                      </button>
+                      <button
+                        onClick={() => deletePreset(p.name)}
+                        className="rounded p-1 text-[var(--text-3)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger-text)]"
+                        title={`Delete “${p.name}”`}
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const name = window.prompt("Name this view preset:", "My view");
+                      if (name && name.trim()) {
+                        savePreset(name.trim());
+                        close();
+                      }
+                    }}
+                    className="mt-1 flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--text-soft)] hover:bg-[var(--surface-2)]"
+                  >
+                    <Plus size={13} className="text-[var(--mint-text)]" /> Save current view
+                  </button>
+                </MenuGroup>
               </>
             )}
           </Dropdown>
@@ -1466,7 +1600,7 @@ export default function DevTracker() {
             Nothing matches your filters — try clearing some filters!
           </div>
         ) : ui.view === "insights" ? (
-          <Insights items={items} />
+          <Insights items={items} digest={buildDigest(data)} />
         ) : ui.view === "graph" ? (
           <GraphView items={graphItems} langFilter={ui.langFilter} onLangFilterChange={(lang) => updateUI({ langFilter: lang })} setToast={setToast} onExportSubgraph={exportSubgraph} />
         ) : useVirtual ? (

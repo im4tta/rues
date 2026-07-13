@@ -19,6 +19,7 @@ import {
 import type { Developer, Repo, Item } from "@/lib/types";
 import { timeAgo, formatDateTime, syncLabel } from "@/lib/format";
 import { languageColor } from "@/lib/colors";
+import { computeClusters, clusterColor } from "@/lib/analytics";
 import { renderBasicMarkdownLines } from "@/lib/markdown";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { Chip } from "@/components/ui/Chip";
@@ -40,6 +41,7 @@ export const GraphView = React.memo(function GraphView({
   const [selected, setSelected] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
   const [sizeBy, setSizeBy] = useState<"impact" | "equal">("impact");
+  const [colorBy, setColorBy] = useState<"kind" | "language" | "cluster">("kind");
   const [connectedOnly, setConnectedOnly] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [searchQuery, setSearchQuery] = useState("");
@@ -162,6 +164,8 @@ export const GraphView = React.memo(function GraphView({
       };
     });
 
+    const clusterMap = computeClusters(items);
+
     let es: { source: string; target: string; kind: string }[] = [];
     const adj = new Map<string, Set<string>>();
     const degree = new Map<string, number>();
@@ -212,7 +216,7 @@ export const GraphView = React.memo(function GraphView({
       activeIds = new Set([...activeIds].filter((id) => connected.has(id)));
     }
 
-    const ns = raw.filter((n) => activeIds.has(n.id));
+    const ns = raw.filter((n) => activeIds.has(n.id)).map((n) => ({ ...n, cluster: clusterMap.get(n.id) ?? 0 }));
     const filteredEdges = es.filter((e) => activeIds.has(e.source) && activeIds.has(e.target));
 
     adjRef.current = adj;
@@ -258,6 +262,12 @@ export const GraphView = React.memo(function GraphView({
     };
 
     const colorFn = (d: any) => {
+      if (colorBy === "cluster") return clusterColor(d.cluster ?? 0);
+      if (colorBy === "language") {
+        if (d.type === "dev") return "var(--violet-text)";
+        if (d.language) return languageColor(d.language);
+        return "var(--mint-text)";
+      }
       if (d.type === "dev") return "var(--violet-text)";
       if (d.language) return languageColor(d.language);
       return "var(--mint-text)";
@@ -969,6 +979,9 @@ export const GraphView = React.memo(function GraphView({
             <button onClick={() => setSizeBy((s) => (s === "impact" ? "equal" : "impact"))} className={optBtn(sizeBy === "impact")} title="Node size [S]">
               {isMobile ? "sz" : "size"}:{sizeBy === "impact" ? "deg" : "eq"}
             </button>
+            <button onClick={() => setColorBy((c) => (c === "kind" ? "language" : c === "language" ? "cluster" : "kind"))} className={optBtn(colorBy !== "kind")} title="Color mode (kind / language / community)">
+              {colorBy === "kind" ? "kind" : colorBy === "language" ? "lang" : "comm"}
+            </button>
             <button onClick={() => setConnectedOnly((v) => !v)} className={optBtn(connectedOnly)} title="Connected only [C]">
               {isMobile ? "lnk" : "linked"}
             </button>
@@ -1004,12 +1017,12 @@ export const GraphView = React.memo(function GraphView({
             </button>
             <div ref={exportAreaRef}>
               {showExportPopup && <div className="fixed inset-0 z-40" onClick={() => setShowExportPopup(false)} />}
-              <div className="fixed bottom-20 right-4 z-50">
+              <div className={`fixed z-[100] ${isMobile && selectedItem ? "right-3 top-3" : "bottom-20 right-4"}`}>
                 <button onClick={() => setShowExportPopup((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] shadow-lg hover:text-[var(--text)] hover:shadow-xl" title="Export as PNG">
                   <Download size={12} />
                 </button>
                 {showExportPopup && (
-                  <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50" : "absolute right-0 bottom-full mb-2 z-50"} flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
+                  <div className={`${isMobile ? "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[100]" : "absolute right-0 bottom-full mb-2 z-[100]"} flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl`}>
                     <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setShowExportPopup(false); exportPng("dark", selectedDevRef.current); }} className="flex items-center gap-2 whitespace-nowrap rounded px-3 py-1.5 text-[11px] text-[var(--text)] hover:bg-[var(--surface-2)]">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                       Dark background

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts";
+import { buildDigest } from "@/lib/analytics";
 
 type InsightItem = { kind: "dev" | "repo"; id: string; data: any };
 
@@ -59,7 +60,54 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-export default function Insights({ items }: { items: InsightItem[] }) {
+export default function Insights({ items, digest }: { items: InsightItem[]; digest: { kind: string; text: string }[] }) {
+  const { recommendations } = useMemo(() => {
+    const devs = items.filter((i) => i.kind === "dev").map((i) => i.data);
+    const repos = items.filter((i) => i.kind === "repo").map((i) => i.data);
+    const trackedDevSet = new Set(devs.map((d: any) => d.username));
+    const trackedRepoSet = new Set(repos.map((r: any) => r.fullName));
+
+    // Build a bipartite adjacency: dev <-> repo
+    const adjacency: Record<string, Set<string>> = {};
+    for (const d of devs) {
+      adjacency[`dev:${d.username}`] = new Set((d.linkedRepos || []).map((r: string) => `repo:${r}`));
+    }
+    for (const r of repos) {
+      adjacency[`repo:${r.fullName}`] = new Set((r.linkedDevs || []).map((u: string) => `dev:${u}`));
+    }
+
+    const recommendDevs: Record<string, number> = {};
+    const recommendRepos: Record<string, number> = {};
+
+    for (const d of devs) {
+      const seenRepos = adjacency[`dev:${d.username}`] || new Set<string>();
+      for (const repoId of seenRepos) {
+        const others = adjacency[repoId] || new Set<string>();
+        for (const otherDevId of others) {
+          const username = otherDevId.replace("dev:", "");
+          if (!trackedDevSet.has(username)) {
+            recommendDevs[username] = (recommendDevs[username] || 0) + 1;
+          }
+        }
+      }
+    }
+    for (const r of repos) {
+      const seenDevs = adjacency[`repo:${r.fullName}`] || new Set<string>();
+      for (const devId of seenDevs) {
+        const otherRepos = adjacency[devId] || new Set<string>();
+        for (const otherRepoId of otherRepos) {
+          const fullName = otherRepoId.replace("repo:", "");
+          if (!trackedRepoSet.has(fullName)) {
+            recommendRepos[fullName] = (recommendRepos[fullName] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    const devRecs = Object.entries(recommendDevs).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    const repoRecs = Object.entries(recommendRepos).sort((a, b) => b[1] - a[1]).slice(0, 8);
+    return { recommendations: { devRecs, repoRecs } };
+  }, [items]);
   const textColor = cssVar("--text", "#e1e4e8");
   const subColor = cssVar("--text-3", "#8890a0");
   const borderColor = cssVar("--border", "#232a38");
@@ -391,6 +439,27 @@ export default function Insights({ items }: { items: InsightItem[] }) {
         </span>
       </div>
 
+      {digest && digest.length > 0 && (
+        <div className="mb-5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="font-mono text-[11px] uppercase tracking-wider text-[var(--text-3)]">Weekly digest</span>
+            <span className="rounded-full bg-[var(--mint-bg)] px-2 py-0.5 text-[10px] text-[var(--mint-text)]">last 7 days</span>
+          </div>
+          <ul className="space-y-1">
+            {digest.map((e, i) => (
+              <li key={i} className="flex items-center gap-2 text-[12px] text-[var(--text-2)]">
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    e.kind === "new" ? "bg-[var(--mint-text)]" : e.kind === "stars" ? "bg-[var(--amber-text)]" : "bg-[var(--violet-text)]"
+                  }`}
+                />
+                {e.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
         <StatCard label="Developers" value={devCount} />
         <StatCard label="Repositories" value={repoCount} />
@@ -449,6 +518,51 @@ export default function Insights({ items }: { items: InsightItem[] }) {
         {linkRows.length > 0 && (
           <ChartCard title="Link Density" subtitle="Linked repos per developer">
             <EChart option={linkOption} />
+          </ChartCard>
+        )}
+
+        {(recommendations.devRecs.length > 0 || recommendations.repoRecs.length > 0) && (
+          <ChartCard title="Discover" subtitle="People & repos your network already connects to">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {recommendations.devRecs.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[11px] uppercase tracking-wider text-[var(--text-3)]">Developers to track</div>
+                  <div className="flex flex-wrap gap-1">
+                    {recommendations.devRecs.map(([u, n]) => (
+                      <a
+                        key={u}
+                        href={`https://github.com/${u}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-[var(--violet-text)] hover:bg-[var(--violet-bg)]"
+                        title={`${n} of your tracked devs link to repos ${u} contributes to`}
+                      >
+                        @{u} <span className="text-[var(--text-3)]">×{n}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {recommendations.repoRecs.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[11px] uppercase tracking-wider text-[var(--text-3)]">Repos to track</div>
+                  <div className="flex flex-wrap gap-1">
+                    {recommendations.repoRecs.map(([f, n]) => (
+                      <a
+                        key={f}
+                        href={`https://github.com/${f}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 text-[11px] text-[var(--mint-text)] hover:bg-[var(--mint-bg)]"
+                        title={`${n} of your tracked devs link to ${f}`}
+                      >
+                        {f} <span className="text-[var(--text-3)]">×{n}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </ChartCard>
         )}
       </div>
