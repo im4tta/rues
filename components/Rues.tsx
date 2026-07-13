@@ -35,6 +35,7 @@ import { DEFAULT_UI, VIRTUALIZE_THRESHOLD } from "@/lib/constants";
 import { sortItems, buildSections } from "@/lib/sort";
 import { downloadFile } from "@/lib/download";
 import { loadDirectory, saveDirectory, loadPresets, savePresets, loadMyUsername, saveMyUsername, savePublishHandle, loadPublishHandle } from "@/lib/storage";
+import { encodeShare } from "@/lib/share";
 import {
   buildDevMarkdown,
   buildRepoMarkdown,
@@ -448,30 +449,22 @@ export default function DevTracker() {
     }
   };
 
-  // Publish snapshot to the backend so /share/[slug] shows YOUR data to anyone.
-  const publishDirectory = async () => {
+  // Build a self-contained share link: the directory is encoded into the URL
+  // fragment so anyone who opens it sees YOUR data — no backend, no 404s.
+  const generateShareLink = () => {
     const handle = publishHandleInput.trim().replace(/^@/, "");
-    if (!handle) {
-      setPublishError("Enter a handle for the public link.");
-      return;
-    }
     setPublishing(true);
     setPublishError("");
     setPublishResult(null);
     try {
-      const res = await fetch("/api/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle, data }),
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || "Publish failed");
+      const url = encodeShare(data.devs, data.repos, handle);
       savePublishHandle(handle);
-      setPublishResult({ slug: j.slug, url: j.url });
-      setToast("Published! Opening shared page…");
-      window.open(j.url, "_blank", "noopener");
+      setPublishResult({ slug: handle || "link", url });
+      navigator.clipboard?.writeText(`${window.location.origin}${url}`).catch(() => {});
+      setToast("Share link copied & opened!");
+      window.open(url, "_blank", "noopener");
     } catch (e: any) {
-      setPublishError(e.message || "Publish failed");
+      setPublishError(e.message || "Could not build share link");
     } finally {
       setPublishing(false);
     }
@@ -1522,21 +1515,21 @@ export default function DevTracker() {
               </div>
               <div className="mt-3 space-y-3 text-[12px] text-[var(--text-2)]">
                 <p>
-                  This saves a snapshot of your current directory to the backend so anyone with the link
-                  sees <strong>your</strong> data — not their own local copy. Re-publishing the same handle
-                  overwrites it.
+                  The entire directory is packed into the link itself, so anyone who opens it sees{" "}
+                  <strong>your</strong> data — no login, no server, no &ldquo;doesn&rsquo;t exist&rdquo; error.
+                  It&rsquo;s also copied to your clipboard.
                 </p>
                 <input
                   value={publishHandleInput}
                   onChange={(e) => setPublishHandleInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && publishDirectory()}
-                  placeholder="handle (e.g. im4tta)"
+                  onKeyDown={(e) => e.key === "Enter" && generateShareLink()}
+                  placeholder="label (optional, e.g. im4tta)"
                   className="w-full rounded border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none placeholder-[var(--placeholder)]"
                 />
                 {publishError && <p className="text-[12px] text-[var(--rose-text)]">{publishError}</p>}
                 {publishResult && (
                   <p className="text-[12px] text-[var(--mint-text)]">
-                    Live at <a href={publishResult.url} target="_blank" rel="noopener" className="underline">{publishResult.url}</a>
+                    Link ready — <a href={publishResult.url} target="_blank" rel="noopener" className="underline">open it</a>
                   </p>
                 )}
               </div>
@@ -1548,12 +1541,12 @@ export default function DevTracker() {
                   Cancel
                 </button>
                 <button
-                  onClick={publishDirectory}
+                  onClick={generateShareLink}
                   disabled={publishing}
                   className="flex items-center gap-1.5 rounded-md border border-[var(--mint-text)] px-3 py-1.5 text-[12px] text-[var(--mint-text)] hover:bg-[var(--mint-text)] hover:text-white disabled:opacity-40"
                 >
                   {publishing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                  {publishing ? "Publishing…" : "Publish & open"}
+                  {publishing ? "Building…" : "Copy share link"}
                 </button>
               </div>
             </div>

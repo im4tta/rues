@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { loadDirectory, loadPublishHandle } from "@/lib/storage";
+import { parseShareHash } from "@/lib/share";
 import type { Developer, Repo } from "@/lib/types";
 import { ShareView } from "@/components/ShareView";
 
@@ -12,6 +13,17 @@ export default function SharePage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    // A self-contained share link carries the directory in the URL fragment.
+    const shared = parseShareHash(window.location.hash);
+    if (shared) {
+      setDevs(shared.devs);
+      setRepos(shared.repos);
+      setHandle(shared.handle);
+      setReady(true);
+      return;
+    }
+
+    // Otherwise fall back to this browser's local directory (preview).
     const d = loadDirectory();
     setDevs(d.devs);
     setRepos(d.repos);
