@@ -8,12 +8,3 @@ export const LANG_COLORS: Record<string, string> = {
 };
 
 export const languageColor = (lang?: string | null) => lang ? (LANG_COLORS[lang] || "var(--text-3)") : "var(--text-3)";
-
-export const resolveColor = (c: string): string => {
-  if (c.startsWith("var(")) {
-    const name = c.slice(4, -1).trim();
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || "#888888";
-  }
-  return c;
-};

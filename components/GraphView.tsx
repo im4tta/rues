@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as d3 from "d3";
 import {
+  AlertCircle,
   Clock,
   Download,
   ExternalLink,
@@ -55,7 +56,6 @@ export const GraphView = React.memo(function GraphView({
   const [fullscreen, setFullscreen] = useState(false);
   const [cssFullscreen, setCssFullscreen] = useState(false);
   const exportAreaRef = useRef<HTMLDivElement>(null);
-  const selectedDevRef = useRef<any>(null);
   const [pinVersion, setPinVersion] = useState(0);
   const pinnedRef = useRef<Set<string>>(new Set());
   const simRef = useRef<d3.Simulation<any, any> | null>(null);
@@ -73,8 +73,15 @@ export const GraphView = React.memo(function GraphView({
   // Contributors overlay: fetch repo contributors and show them as connected nodes.
   type Contributor = { login: string; avatar_url: string; contributions: number; html_url: string };
   const [showContributors, setShowContributors] = useState(false);
-  const [contributors, setContributors] = useState<Record<string, Contributor[]>>({});
+  const [contributors, setContributors] = useState<Record<string, Contributor[]>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("rues-contributors") || "{}");
+    } catch { return {}; }
+  });
+  const contributorsRef = useRef(contributors);
+  contributorsRef.current = contributors;
   const [contribLoading, setContribLoading] = useState(false);
+  const [contribError, setContribError] = useState("");
 
   const isContribId = (id: string) => id.startsWith("contrib:");
 
@@ -116,10 +123,13 @@ export const GraphView = React.memo(function GraphView({
   );
   useEffect(() => {
     if (!showContributors) return;
+    setContribError("");
     const names = repoNamesKey ? repoNamesKey.split("|") : [];
-    const missing = names.filter((n) => n && !contributors[n]);
+    const currentContribs = contributorsRef.current;
+    const missing = names.filter((n) => n && !currentContribs[n]);
     if (missing.length === 0) return;
     let cancelled = false;
+    let rateLimited = false;
     setContribLoading(true);
     (async () => {
       const results: Array<[string, Contributor[]]> = await Promise.all(
@@ -127,7 +137,10 @@ export const GraphView = React.memo(function GraphView({
           const [o, r] = n.split("/");
           try {
             const res = await ghContributors(o, r);
-            if (!res.ok) return [n, [] as Contributor[]];
+            if (!res.ok) {
+              if (res.status === 403 || res.status === 429) rateLimited = true;
+              return [n, [] as Contributor[]];
+            }
             const j = await res.json();
             return [n, (j.contributors || []) as Contributor[]];
           } catch {
@@ -139,13 +152,13 @@ export const GraphView = React.memo(function GraphView({
       setContributors((prev) => {
         const next = { ...prev };
         for (const [n, cs] of results) next[n] = cs;
+        try { localStorage.setItem("rues-contributors", JSON.stringify(next)); } catch {}
         return next;
       });
+      if (rateLimited) setContribError("GitHub API rate limit reached — contributors may be incomplete. Try again later.");
       setContribLoading(false);
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showContributors, repoNamesKey]);
 
@@ -970,8 +983,6 @@ export const GraphView = React.memo(function GraphView({
   const devCount = nodes.filter((n) => n.type === "dev").length;
   const repoCount = nodes.length - devCount;
   const selectedItem = selected ? items.find((i) => i.id === selected) : undefined;
-  if (selectedItem?.kind === "dev") selectedDevRef.current = selectedItem.data;
-  else if (!selected) selectedDevRef.current = null;
   const isMobile = dimensions.width < 640;
 
   useEffect(() => {
@@ -1125,6 +1136,11 @@ export const GraphView = React.memo(function GraphView({
             >
               {contribLoading ? <Loader2 size={11} className="animate-spin" /> : <Users size={11} />} contrib
             </button>
+            {contribError && (
+              <span className="flex items-center gap-1 font-mono text-[10px] text-[var(--danger-text)]">
+                <AlertCircle size={10} /> {contribError}
+              </span>
+            )}
             {focusMode && focusNodeId && onExportSubgraph && (
               <button onClick={() => {
                 const adj = new Set<string>([focusNodeId]);

@@ -143,9 +143,7 @@ export function RepoCard({
               <Copy size={14} />
             </button>
             <button
-              onClick={() => {
-                if (window.confirm(`Remove ${repo.fullName} from tracking?`)) onDelete(repo.fullName);
-              }}
+              onClick={() => onDelete(repo.fullName)}
               className="rounded p-1.5 text-[var(--text-3)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger-text-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--danger-text-hover)]"
               title="Remove"
               aria-label={`Remove ${repo.fullName}`}

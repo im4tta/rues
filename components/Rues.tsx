@@ -556,8 +556,6 @@ export default function DevTracker() {
   });
 
   const deleteDev = (username: string) => {
-    const dev = data.devs[username];
-    // Pre-select no linked items for deletion
     setDeleteModal({
       type: "dev",
       username,
@@ -566,8 +564,6 @@ export default function DevTracker() {
   };
 
   const deleteRepo = (fullName: string) => {
-    const repo = data.repos[fullName];
-    // Pre-select no linked items for deletion
     setDeleteModal({
       type: "repo",
       fullName,

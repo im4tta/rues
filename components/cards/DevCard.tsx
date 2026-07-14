@@ -164,9 +164,7 @@ export function DevCard({
               </button>
             )}
             <button
-              onClick={() => {
-                if (window.confirm(`Remove @${dev.username} from tracking?`)) onDelete(dev.username);
-              }}
+              onClick={() => onDelete(dev.username)}
               className="rounded p-1.5 text-[var(--text-3)] hover:bg-[var(--danger-bg)] hover:text-[var(--danger-text-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--danger-text-hover)]"
               title="Remove"
               aria-label={`Remove @${dev.username}`}

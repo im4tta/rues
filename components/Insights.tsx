@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import * as echarts from "echarts";
-import { buildDigest } from "@/lib/analytics";
 
 type InsightItem = { kind: "dev" | "repo"; id: string; data: any };
 
